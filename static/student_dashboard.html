@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SmartClass AI — Student Dashboard</title>
+  <script>
+    (function () {
+      try {
+        var user = JSON.parse(localStorage.getItem("smartclass_user") || "null");
+        if (!user || user.role !== "student") {
+          var next = encodeURIComponent(window.location.pathname + window.location.search);
+          window.location.replace("/?redirect=" + next);
+        }
+      } catch (e) {
+        window.location.replace("/");
+      }
+    })();
+  </script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            cream: "#fff8f0",
+            caramel: "#c08552",
+            mocha: "#8c5a3c",
+            coffee: "#4b2e2b",
+          },
+        },
+      },
+    };
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet" />
+  <style>
+    body { font-family: 'Inter', system-ui, -apple-system, sans-serif; }
+    .font-mono { font-family: 'JetBrains Mono', monospace; }
+  </style>
+</head>
+<body class="bg-[#fff8f0] text-[#4b2e2b] min-h-screen py-6 px-4 sm:px-6">
+
+  <div id="toast-container" class="fixed bottom-5 right-5 z-50 flex flex-col gap-3 max-w-sm w-full pointer-events-none px-4 sm:px-0"></div>
+
+  <div class="max-w-xl mx-auto space-y-6">
+
+    <!-- Cozy Header -->
+    <header class="bg-white rounded-2xl border border-[#8c5a3c]/15 shadow-lg shadow-[#8c5a3c]/10 p-5 flex items-center justify-between gap-3">
+      <div class="flex items-center gap-3.5">
+        <div class="w-11 h-11 rounded-2xl bg-gradient-to-br from-[#c08552] to-[#8c5a3c] flex items-center justify-center text-[#fff8f0] font-bold text-sm shadow-sm">
+          SC
+        </div>
+        <div>
+          <h1 id="student-header-name" class="text-base font-bold text-[#4b2e2b]">Student Dashboard</h1>
+          <p id="student-ws-status" class="text-xs text-[#8c5a3c]">Connecting live...</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <a href="/forum" class="text-xs font-semibold text-[#8c5a3c] bg-[#fff8f0] border border-[#8c5a3c]/20 hover:border-[#c08552] hover:text-[#4b2e2b] px-3.5 py-2 rounded-xl transition">
+          Class Forum
+        </a>
+        <button id="student-signout-btn" class="text-xs font-semibold text-white bg-[#c08552] hover:bg-[#8c5a3c] px-3.5 py-2 rounded-xl transition shadow-sm">
+          Sign Out
+        </button>
+      </div>
+    </header>
+
+    <!-- Signed-in Student Identity Card -->
+    <section class="bg-white rounded-2xl border border-[#8c5a3c]/15 shadow-lg shadow-[#8c5a3c]/10 px-6 py-4 flex items-center justify-between">
+      <div>
+        <p class="text-[11px] uppercase tracking-wider text-[#8c5a3c] font-semibold">Signed-In Student ID</p>
+        <p id="student-id-display" class="font-mono text-base font-bold text-[#4b2e2b] mt-0.5"></p>
+      </div>
+      <span class="text-xs font-semibold text-[#4b2e2b] bg-[#fff8f0] border border-[#c08552]/35 px-3 py-1.5 rounded-full">
+        Verified Session
+      </span>
+    </section>
+
+    <!-- Active 5-Min Timed Quiz Card (Shown when accessed via /s/{token}) -->
+    <section id="quiz-card" class="hidden bg-white rounded-2xl border border-[#c08552]/35 shadow-lg shadow-[#8c5a3c]/10 p-6 space-y-5">
+      <div class="flex items-center justify-between">
+        <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-[#c08552]/15 text-[#8c5a3c]">
+          5-Min QR Quiz
+        </span>
+        <span id="student-quiz-timer" class="font-mono text-base font-bold text-[#c08552]">05:00</span>
+      </div>
+
+      <h3 id="student-question-text" class="text-base font-bold text-[#4b2e2b] leading-snug"></h3>
+
+      <form id="quiz-submit-form" class="space-y-3">
+        <div id="quiz-options-container" class="space-y-2.5"></div>
+        <button type="submit" class="w-full mt-2 bg-[#c08552] hover:bg-[#8c5a3c] text-white font-semibold py-3.5 rounded-2xl transition shadow-md shadow-[#c08552]/20 text-sm">
+          Submit Answer
+        </button>
+      </form>
+    </section>
+
+    <!-- Quiz Confirmation / Expiry Banner -->
+    <section id="quiz-result-banner" class="hidden rounded-2xl border p-6 text-center space-y-2 shadow-lg shadow-[#8c5a3c]/10"></section>
+
+    <!-- Available Courses & Enrollment Requests -->
+    <section class="bg-white rounded-2xl border border-[#8c5a3c]/15 shadow-lg shadow-[#8c5a3c]/10 p-6 space-y-4">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="text-base font-bold text-[#4b2e2b]">Available Courses</h2>
+          <p class="text-xs text-[#8c5a3c]">Request to join a course (requires lecturer approval)</p>
+        </div>
+        <button id="refresh-courses-btn" class="text-xs font-semibold text-[#c08552] hover:text-[#8c5a3c] transition">Refresh</button>
+      </div>
+      <div id="available-courses-list" class="space-y-3"></div>
+    </section>
+
+    <!-- Active Instant KISS Poll Card -->
+    <section class="bg-white rounded-2xl border border-[#8c5a3c]/15 shadow-lg shadow-[#8c5a3c]/10 p-6 space-y-4">
+      <div class="flex items-center justify-between">
+        <h2 class="text-base font-bold text-[#4b2e2b]">Live Class Poll</h2>
+        <button id="refresh-poll-btn" class="text-xs font-semibold text-[#c08552] hover:text-[#8c5a3c] transition">Refresh</button>
+      </div>
+      <div id="student-poll-container"></div>
+    </section>
+
+    <!-- Private Message to Lecturer -->
+    <section class="bg-white rounded-2xl border border-[#8c5a3c]/15 shadow-lg shadow-[#8c5a3c]/10 p-6 space-y-4">
+      <div>
+        <h2 class="text-base font-bold text-[#4b2e2b]">Private Message to Lecturer</h2>
+        <p class="text-xs text-[#8c5a3c]">Send a quiet question directly to your instructor</p>
+      </div>
+      <form id="private-msg-form" class="space-y-3">
+        <textarea id="private-msg-text" rows="2" placeholder="Ask a private question to your lecturer..." class="w-full rounded-2xl border border-[#8c5a3c]/25 bg-[#fff8f0]/40 px-4 py-3 text-sm text-[#4b2e2b] placeholder:text-[#8c5a3c]/50 focus:bg-white focus:ring-2 focus:ring-[#c08552] outline-none transition"></textarea>
+        <button type="submit" class="w-full bg-[#4b2e2b] hover:bg-[#8c5a3c] text-[#fff8f0] text-sm font-semibold py-3 rounded-2xl transition shadow-sm">
+          Send Private Note
+        </button>
+      </form>
+      <p id="private-msg-status" class="hidden text-xs text-[#8c5a3c] font-semibold">Message sent privately to lecturer.</p>
+    </section>
+
+  </div>
+
+  <script type="module" src="/static/js/student.js"></script>
+</body>
+</html>

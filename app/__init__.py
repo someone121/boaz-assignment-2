@@ -1,0 +1,1 @@
+"""SmartClass AI backend package."""

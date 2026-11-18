@@ -1,0 +1,19 @@
+services:
+  smartclass-app:
+    build: .
+    container_name: smartclass_ai
+    working_dir: /app
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONPATH=/app
+      - DATABASE_URL=sqlite:///./data/smartclass.db
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - SECRET_KEY=${SECRET_KEY:-supersecret_kiss_key}
+    volumes:
+      - ./app:/app/app
+      - ./static:/app/static
+      - ./data:/app/data
+      - ./uploads:/app/uploads
+      - ./reports:/app/reports
+    restart: unless-stopped

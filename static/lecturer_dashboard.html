@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SmartClass AI — Lecturer Dashboard</title>
+  <script>
+    (function () {
+      try {
+        var user = JSON.parse(localStorage.getItem("smartclass_user") || "null");
+        if (!user || user.role !== "lecturer") {
+          window.location.replace("/");
+        }
+      } catch (e) {
+        window.location.replace("/");
+      }
+    })();
+  </script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            cream: "#fff8f0",
+            caramel: "#c08552",
+            mocha: "#8c5a3c",
+            coffee: "#4b2e2b",
+          },
+        },
+      },
+    };
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet" />
+  <style>
+    body { font-family: 'Inter', system-ui, -apple-system, sans-serif; }
+    .font-mono { font-family: 'JetBrains Mono', monospace; }
+  </style>
+</head>
+<body class="bg-[#fff8f0] text-[#4b2e2b] min-h-screen flex flex-col">
+
+  <!-- Toast Notification Banner -->
+  <div id="toast-container" class="fixed bottom-5 right-5 z-50 flex flex-col gap-3 max-w-sm w-full pointer-events-none px-4 sm:px-0"></div>
+
+  <!-- Fixed Warm Glassmorphic Navbar -->
+  <header class="sticky top-0 z-40 backdrop-blur-md bg-[#fff8f0]/90 border-b border-[#8c5a3c]/15">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-2xl bg-gradient-to-br from-[#c08552] to-[#8c5a3c] flex items-center justify-center text-[#fff8f0] font-bold shadow-sm">
+          SC
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="font-bold text-[#4b2e2b] tracking-tight">SmartClass AI</span>
+            <span id="ws-badge" class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-white border border-[#8c5a3c]/20 text-[#8c5a3c]">
+              <span class="w-1.5 h-1.5 rounded-full bg-[#c08552] animate-pulse"></span>
+              Connecting
+            </span>
+          </div>
+          <p class="text-xs text-[#8c5a3c] hidden sm:block">Lecturer Control Center</p>
+        </div>
+      </div>
+
+      <!-- Session Controls -->
+      <div class="flex items-center gap-2 flex-wrap">
+        <select id="session-select" class="text-sm bg-white border border-[#8c5a3c]/25 rounded-xl px-3 py-1.5 font-medium text-[#4b2e2b] focus:outline-none focus:ring-2 focus:ring-[#c08552] max-w-[210px]">
+          <option value="">Loading sessions...</option>
+        </select>
+        <input id="new-course-input" type="text" placeholder="Session name (e.g. I2SE)" class="hidden md:block text-sm bg-white border border-[#8c5a3c]/25 rounded-xl px-3 py-1.5 w-44 text-[#4b2e2b] placeholder:text-[#8c5a3c]/50 focus:outline-none focus:ring-2 focus:ring-[#c08552]" />
+        <button id="start-session-btn" class="bg-[#c08552] hover:bg-[#8c5a3c] text-white text-xs sm:text-sm font-semibold px-4 py-1.5 rounded-xl transition shadow-sm">
+          + Start Session
+        </button>
+        <button id="header-view-report-btn" class="bg-white border border-[#8c5a3c]/30 hover:border-[#c08552] text-[#4b2e2b] text-xs sm:text-sm font-semibold px-3.5 py-1.5 rounded-xl transition">
+          View Report (צפה בדוח)
+        </button>
+      </div>
+
+      <!-- Page Nav & Auth -->
+      <nav class="flex items-center gap-2">
+        <a href="/forum" target="_blank" class="text-xs sm:text-sm font-semibold text-[#8c5a3c] hover:text-[#4b2e2b] px-3 py-1.5 rounded-xl hover:bg-white transition">
+          Class Forum
+        </a>
+        <span id="lecturer-name-badge" class="hidden sm:inline-block text-xs font-semibold text-[#4b2e2b] bg-white border border-[#8c5a3c]/20 px-3 py-1.5 rounded-xl"></span>
+        <button id="lecturer-signout-btn" class="text-xs sm:text-sm font-semibold text-[#fff8f0] bg-[#4b2e2b] hover:bg-[#8c5a3c] px-3.5 py-1.5 rounded-xl transition">
+          Sign Out
+        </button>
+      </nav>
+    </div>
+
+    <!-- Tab Bar -->
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 border-t border-[#8c5a3c]/10 flex gap-2 overflow-x-auto">
+      <button data-tab="quiz-polls" class="tab-btn active px-4 py-3 text-sm font-semibold border-b-2 border-[#c08552] text-[#c08552] whitespace-nowrap transition">
+        1. Live Quiz &amp; Instant Polls
+      </button>
+      <button data-tab="ai-studio" class="tab-btn px-4 py-3 text-sm font-medium border-b-2 border-transparent text-[#8c5a3c] hover:text-[#4b2e2b] whitespace-nowrap transition">
+        2. AI Video Summary &amp; HW Review
+      </button>
+      <button data-tab="attendance" class="tab-btn px-4 py-3 text-sm font-medium border-b-2 border-transparent text-[#8c5a3c] hover:text-[#4b2e2b] whitespace-nowrap transition">
+        3. Attendance Control
+      </button>
+      <button data-tab="enrollments" class="tab-btn px-4 py-3 text-sm font-medium border-b-2 border-transparent text-[#8c5a3c] hover:text-[#4b2e2b] whitespace-nowrap transition inline-flex items-center gap-2">
+        <span>4. Pending Enrollments</span>
+        <span id="pending-enroll-count-badge" class="px-2 py-0.5 rounded-full text-xs font-bold bg-[#c08552]/20 text-[#4b2e2b]">0</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Workspace -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-7">
+
+    <!-- TAB 1: LIVE QUIZ & INSTANT POLLS -->
+    <section id="tab-quiz-polls" class="tab-panel grid grid-cols-1 lg:grid-cols-12 gap-7">
+
+      <!-- Left Column: Excel Upload + 5-Min Timed QR -->
+      <div class="lg:col-span-6 space-y-7">
+        <div class="bg-white rounded-2xl border border-[#8c5a3c]/15 shadow-lg shadow-[#8c5a3c]/10 p-6 sm:p-7 space-y-4">
+          <div class="flex items-center justify-between">
+            <div>
+              <h2 class="text-base font-bold text-[#4b2e2b]">Excel Question Bank (.xlsx)</h2>
+              <p class="text-xs text-[#8c5a3c]">Upload pre-made multiple-choice or True/False questions</p>
+            </div>
+            <span id="question-count-badge" class="px-3 py-1 rounded-full text-xs font-semibold bg-[#fff8f0] border border-[#8c5a3c]/20 text-[#4b2e2b]">
+              0 Loaded
+            </span>
+          </div>
+
+          <div id="questions-exhausted-alert" class="hidden rounded-2xl bg-[#fff8f0] border border-[#c08552] px-4 py-3 text-sm text-[#4b2e2b] font-medium">
+            All questions in the uploaded Excel bank have been used. Upload a new sheet to continue.
+          </div>
+
+          <form id="excel-upload-form" class="space-y-3">
+            <label class="flex flex-col items-center justify-center border-2 border-dashed border-[#8c5a3c]/30 hover:border-[#c08552] rounded-2xl p-5 cursor-pointer bg-[#fff8f0]/60 hover:bg-[#fff8f0] transition">
+              <span class="text-sm font-semibold text-[#c08552]">Choose .xlsx Question File</span>
+              <span id="excel-file-label" class="text-xs text-[#8c5a3c] mt-1">Columns: Question, Option A, Option B, Option C, Option D, Correct</span>
+              <input id="excel-upload-input" type="file" accept=".xlsx" class="hidden" />
+            </label>
+            <button type="submit" class="w-full bg-[#c08552] hover:bg-[#8c5a3c] text-white text-sm font-semibold py-2.5 rounded-xl transition shadow-sm">
+              Upload Question Bank
+            </button>
+          </form>
+
+          <div id="question-list" class="space-y-2 max-h-56 overflow-y-auto pr-1"></div>
+        </div>
+
+        <div class="bg-white rounded-2xl border border-[#8c5a3c]/15 shadow-lg shadow-[#8c5a3c]/10 p-6 sm:p-7 space-y-4">
+          <div class="flex items-center justify-between gap-2">
+            <div>
+              <h2 class="text-base font-bold text-[#4b2e2b]">5-Minute Timed QR Challenge</h2>
+              <p class="text-xs text-[#8c5a3c]">Generates a 300-second expiring token for smartphone scan</p>
+            </div>
+            <button id="launch-next-question-btn" class="bg-[#c08552] hover:bg-[#8c5a3c] text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition shadow-sm shrink-0">
+              Launch Next Question
+            </button>
+          </div>
+
+          <div id="active-qr-panel" class="hidden rounded-2xl bg-[#4b2e2b] text-[#fff8f0] p-6 shadow-inner">
+            <div class="flex flex-col sm:flex-row items-center gap-6">
+              <div class="bg-white p-3 rounded-2xl shadow-lg shrink-0">
+                <div id="qr-canvas" class="w-44 h-44 flex items-center justify-center"></div>
+              </div>
+              <div class="flex-1 text-center sm:text-left">
+                <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#c08552]/30 text-[#fff8f0] text-xs font-semibold mb-2">
+                  LIVE 5-MIN WINDOW
+                </div>
+                <div id="quiz-countdown" class="font-mono text-4xl font-bold tracking-tight text-[#fff8f0] mb-2">05:00</div>
+                <p id="active-question-prompt" class="text-sm text-[#fff8f0]/90 font-medium mb-3"></p>
+                <div class="flex flex-wrap items-center justify-center sm:justify-start gap-2">
+                  <a id="qr-direct-link" href="#" target="_blank" class="text-xs font-mono bg-[#8c5a3c]/50 hover:bg-[#8c5a3c] text-[#fff8f0] px-3 py-1.5 rounded-xl transition truncate max-w-[230px]"></a>
+                  <span id="quiz-response-counter" class="text-xs font-semibold bg-[#c08552] text-white px-3 py-1.5 rounded-xl">
+                    0 Responses
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div id="empty-qr-state"></div>
+        </div>
+      </div>
+
+      <!-- Right Column: Instant KISS Poll + Live Charts -->
+      <div class="lg:col-span-6 space-y-7">
+        <div class="bg-white rounded-2xl border border-[#8c5a3c]/15 shadow-lg shadow-[#8c5a3c]/10 p-6 sm:p-7 space-y-4">
+          <div class="flex items-center justify-between">
+            <div>
+              <h2 class="text-base font-bold text-[#4b2e2b]">Instant KISS Poll</h2>
+              <p class="text-xs text-[#8c5a3c]">Broadcast a 1-tap understanding check to students</p>
+            </div>
+            <button id="preset-yesno-btn" type="button" class="text-xs font-semibold text-[#8c5a3c] bg-[#fff8f0] border border-[#8c5a3c]/25 hover:border-[#c08552] hover:text-[#4b2e2b] px-3 py-1.5 rounded-xl transition">
+              Quick Yes/No Preset
+            </button>
+          </div>
+          <form id="poll-create-form" class="space-y-3">
+            <input id="poll-prompt" type="text" placeholder="e.g. Do you follow the Strategy Pattern example?" class="w-full rounded-2xl border border-[#8c5a3c]/25 bg-[#fff8f0]/40 px-4 py-3 text-sm text-[#4b2e2b] focus:bg-white focus:ring-2 focus:ring-[#c08552] outline-none transition" />
+            <div class="grid grid-cols-2 gap-3">
+              <input id="poll-opt-1" type="text" value="Yes, clear" class="rounded-xl border border-[#8c5a3c]/25 bg-[#fff8f0]/40 px-3.5 py-2.5 text-sm text-[#4b2e2b] focus:bg-white focus:ring-2 focus:ring-[#c08552] outline-none" />
+              <input id="poll-opt-2" type="text" value="Need recap" class="rounded-xl border border-[#8c5a3c]/25 bg-[#fff8f0]/40 px-3.5 py-2.5 text-sm text-[#4b2e2b] focus:bg-white focus:ring-2 focus:ring-[#c08552] outline-none" />
+              <input id="poll-opt-3" type="text" placeholder="Option 3 (optional)" class="rounded-xl border border-[#8c5a3c]/25 bg-[#fff8f0]/40 px-3.5 py-2.5 text-sm text-[#4b2e2b] focus:bg-white focus:ring-2 focus:ring-[#c08552] outline-none" />
+              <input id="poll-opt-4" type="text" placeholder="Option 4 (optional)" class="rounded-xl border border-[#8c5a3c]/25 bg-[#fff8f0]/40 px-3.5 py-2.5 text-sm text-[#4b2e2b] focus:bg-white focus:ring-2 focus:ring-[#c08552] outline-none" />
+            </div>
+            <button type="submit" class="w-full bg-[#c08552] hover:bg-[#8c5a3c] text-white font-semibold py-3 rounded-2xl transition shadow-md shadow-[#c08552]/20">
+              Broadcast Live Poll
+            </button>
+          </form>
+        </div>
+
+        <div class="bg-white rounded-2xl border border-[#8c5a3c]/15 shadow-lg shadow-[#8c5a3c]/10 p-6 sm:p-7 space-y-6">
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <h3 class="text-sm font-bold text-[#4b2e2b]">Live Quiz Option Breakdown</h3>
+              <span id="quiz-chart-total" class="text-xs font-mono text-[#8c5a3c]">0 total</span>
+            </div>
+            <div class="h-44">
+              <canvas id="quiz-chart"></canvas>
+            </div>
+          </div>
+          <div class="border-t border-[#8c5a3c]/15 pt-5">
+            <div class="flex items-center justify-between mb-2">
+              <h3 id="poll-chart-title" class="text-sm font-bold text-[#4b2e2b]">Active Poll Results</h3>
+              <span id="poll-chart-total" class="text-xs font-mono text-[#8c5a3c]">0 votes</span>
+            </div>
+            <div class="h-44">
+              <canvas id="poll-chart"></canvas>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 2: AI VIDEO SUMMARY & HOMEWORK REVIEW -->
+    <section id="tab-ai-studio" class="tab-panel hidden grid grid-cols-1 lg:grid-cols-12 gap-7">
+      <div class="lg:col-span-6 bg-white rounded-2xl border border-[#8c5a3c]/15 shadow-lg shadow-[#8c5a3c]/10 p-6 sm:p-7 space-y-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 class="text-base font-bold text-[#4b2e2b]">AI Lecture Recording Summarizer</h2>
+            <p class="text-xs text-[#8c5a3c]">Upload Zoom/Meet `.mp4`, `.m4a`, or `.txt` — auto-posts to Class Forum</p>
+          </div>
+          <span class="px-3 py-1 rounded-full text-xs font-semibold bg-[#c08552]/20 text-[#4b2e2b]">AI Agent</span>
+        </div>
+
+        <form id="lecture-upload-form" class="space-y-3">
+          <label class="flex flex-col items-center justify-center border-2 border-dashed border-[#8c5a3c]/30 hover:border-[#c08552] rounded-2xl p-6 cursor-pointer bg-[#fff8f0]/60 hover:bg-[#fff8f0] transition">
+            <span class="text-sm font-semibold text-[#c08552]">Select Lecture Recording or Transcript</span>
+            <span id="lecture-file-label" class="text-xs text-[#8c5a3c] mt-1">Supports .mp4, .m4a, .mp3, .wav, .txt, .md</span>
+            <input id="lecture-upload-input" type="file" accept=".mp4,.m4a,.mp3,.wav,.txt,.md" class="hidden" />
+          </label>
+          <button type="submit" class="w-full bg-[#c08552] hover:bg-[#8c5a3c] text-white text-sm font-semibold py-2.5 rounded-xl transition shadow-sm">
+            Summarize &amp; Publish to Forum
+          </button>
+        </form>
+
+        <div id="upload-progress-wrap" class="hidden space-y-1.5">
+          <div class="flex justify-between text-xs font-medium text-[#8c5a3c]">
+            <span id="upload-status-label">Uploading recording...</span>
+            <span id="upload-percent" class="font-mono">0%</span>
+          </div>
+          <div class="w-full h-2 bg-[#fff8f0] rounded-full overflow-hidden border border-[#8c5a3c]/15">
+            <div id="upload-progress-bar" class="h-full bg-[#c08552] transition-all duration-200" style="width: 0%"></div>
+          </div>
+        </div>
+
+        <div id="summary-spinner" class="hidden flex items-center gap-3 rounded-2xl bg-[#fff8f0] border border-[#c08552]/40 px-4 py-3 text-sm text-[#4b2e2b]">
+          <svg class="animate-spin h-4 w-4 text-[#c08552]" viewBox="0 0 24 24" fill="none">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+          </svg>
+          <span>AI agent is transcribing and generating structured takeaways...</span>
+        </div>
+
+        <div id="summary-output" class="rounded-2xl bg-[#fff8f0]/60 border border-[#8c5a3c]/15 p-5 text-sm text-[#4b2e2b] leading-relaxed min-h-[180px] space-y-2"></div>
+      </div>
+
+      <div class="lg:col-span-6 bg-white rounded-2xl border border-[#8c5a3c]/15 shadow-lg shadow-[#8c5a3c]/10 p-6 sm:p-7 space-y-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 class="text-base font-bold text-[#4b2e2b]">AI Homework Comparative Review</h2>
+            <p class="text-xs text-[#8c5a3c]">Evaluates SOLID/OOD design and cross-compares student submissions</p>
+          </div>
+          <span class="px-3 py-1 rounded-full text-xs font-semibold bg-[#fff8f0] border border-[#8c5a3c]/25 text-[#8c5a3c]">Rubric</span>
+        </div>
+
+        <form id="hw-review-form" class="space-y-3">
+          <textarea id="hw-repo-urls" rows="4" placeholder="Enter student repository URLs (one per line):&#10;https://github.com/student1/oop-ex2&#10;https://github.com/student2/oop-ex2" class="w-full rounded-2xl border border-[#8c5a3c]/25 bg-[#fff8f0]/40 px-4 py-3 text-sm font-mono text-[#4b2e2b] placeholder:text-[#8c5a3c]/50 focus:bg-white focus:ring-2 focus:ring-[#c08552] outline-none transition"></textarea>
+          <button type="submit" class="w-full bg-[#c08552] hover:bg-[#8c5a3c] text-white font-semibold py-3 rounded-2xl transition shadow-md shadow-[#c08552]/20">
+            Run Comparative OOD Evaluation
+          </button>
+        </form>
+
+        <div id="hw-comparative-callout" class="hidden rounded-2xl bg-[#fff8f0] border border-[#c08552]/40 p-4 text-xs text-[#4b2e2b] font-medium"></div>
+
+        <div id="hw-review-results" class="overflow-x-auto max-h-[340px] overflow-y-auto rounded-2xl border border-[#8c5a3c]/15"></div>
+      </div>
+    </section>
+
+    <!-- TAB 3: ATTENDANCE CONTROL -->
+    <section id="tab-attendance" class="tab-panel hidden space-y-7">
+      <div class="bg-white rounded-2xl border border-[#8c5a3c]/15 shadow-lg shadow-[#8c5a3c]/10 p-6 sm:p-7 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div class="flex items-center gap-4">
+          <div class="w-12 h-12 rounded-2xl bg-[#c08552]/15 text-[#8c5a3c] flex items-center justify-center font-bold">
+            CV
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <h2 class="text-base font-bold text-[#4b2e2b]">YOLOv8 + ByteTrack Active</h2>
+              <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#fff8f0] border border-[#c08552]/40 text-[#8c5a3c]">70% Threshold Policy</span>
+            </div>
+            <p class="text-xs text-[#8c5a3c] mt-0.5">Process live browser webcam frames or upload a classroom photo/video clip</p>
+          </div>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2.5">
+          <button id="toggle-webcam-btn" class="bg-[#4b2e2b] hover:bg-[#8c5a3c] text-[#fff8f0] text-sm font-semibold px-4 py-2.5 rounded-xl transition">
+            Start Webcam Stream
+          </button>
+          <form id="attendance-file-form" class="flex items-center gap-2">
+            <label class="bg-[#fff8f0] border border-[#8c5a3c]/30 hover:border-[#c08552] text-[#4b2e2b] text-sm font-semibold px-3.5 py-2 rounded-xl cursor-pointer transition">
+              <span id="attendance-file-label">Choose Frame / Video</span>
+              <input id="attendance-file-input" type="file" accept="image/*,video/*" class="hidden" />
+            </label>
+            <button type="submit" class="bg-[#c08552] hover:bg-[#8c5a3c] text-white text-sm font-semibold px-4 py-2 rounded-xl transition">
+              Process
+            </button>
+          </form>
+          <button id="stop-export-btn" class="bg-[#c08552] hover:bg-[#8c5a3c] text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition shadow-sm">
+            End Session &amp; Download CSV
+          </button>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-7">
+        <div class="lg:col-span-5 bg-white rounded-2xl border border-[#8c5a3c]/15 shadow-lg shadow-[#8c5a3c]/10 p-6 sm:p-7 space-y-4">
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-bold text-[#4b2e2b]">Classroom Vision Feed</h3>
+            <span id="attendance-detected-badge" class="text-xs font-mono bg-[#fff8f0] border border-[#8c5a3c]/20 text-[#4b2e2b] px-2.5 py-1 rounded-xl">0 detected</span>
+          </div>
+          <div class="aspect-video bg-[#4b2e2b] rounded-2xl overflow-hidden flex items-center justify-center relative">
+            <video id="webcam-video" autoplay muted playsinline class="w-full h-full object-cover hidden"></video>
+            <canvas id="webcam-canvas" class="hidden"></canvas>
+            <p id="webcam-placeholder" class="text-xs text-[#fff8f0]/80 text-center px-6 leading-relaxed">
+              Click <strong>Start Webcam Stream</strong> or choose a classroom image/video to track attendance.
+            </p>
+          </div>
+          <button id="capture-single-frame-btn" class="hidden w-full bg-[#c08552] hover:bg-[#8c5a3c] text-white text-sm font-semibold py-2.5 rounded-xl transition">
+            Send Frame Now
+          </button>
+        </div>
+
+        <div class="lg:col-span-7 bg-white rounded-2xl border border-[#8c5a3c]/15 shadow-lg shadow-[#8c5a3c]/10 p-6 sm:p-7">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-sm font-bold text-[#4b2e2b]">Tracked Dwell-Time Roster</h3>
+            <button id="refresh-attendance-btn" class="text-xs font-semibold text-[#c08552] hover:text-[#8c5a3c] transition">Refresh</button>
+          </div>
+          <div id="attendance-roster-wrap" class="overflow-x-auto"></div>
+        </div>
+      </div>
+
+      <!-- Session History & Post-Recording Reports -->
+      <div class="bg-white rounded-2xl border border-[#8c5a3c]/15 shadow-lg shadow-[#8c5a3c]/10 p-6 sm:p-7 space-y-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <h3 class="text-base font-bold text-[#4b2e2b]">Session History &amp; Attendance Reports</h3>
+            <p class="text-xs text-[#8c5a3c]">View post-recording CV summary statistics for any session</p>
+          </div>
+          <button id="refresh-sessions-report-btn" class="text-xs font-semibold text-[#c08552] hover:text-[#8c5a3c] transition">Refresh</button>
+        </div>
+        <div id="session-reports-list" class="space-y-3"></div>
+      </div>
+    </section>
+
+    <!-- TAB 4: COURSES & PENDING ENROLLMENTS -->
+    <section id="tab-enrollments" class="tab-panel hidden grid grid-cols-1 lg:grid-cols-12 gap-7">
+      <div class="lg:col-span-7 bg-white rounded-2xl border border-[#8c5a3c]/15 shadow-lg shadow-[#8c5a3c]/10 p-6 sm:p-7 space-y-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 class="text-base font-bold text-[#4b2e2b]">Pending Enrollments</h2>
+            <p class="text-xs text-[#8c5a3c]">Review and approve student requests to join your courses</p>
+          </div>
+          <button id="refresh-enrollments-btn" class="text-xs font-semibold text-[#c08552] hover:text-[#8c5a3c] transition">
+            Refresh
+          </button>
+        </div>
+
+        <div id="pending-enrollments-list" class="space-y-3"></div>
+      </div>
+
+      <div class="lg:col-span-5 bg-white rounded-2xl border border-[#8c5a3c]/15 shadow-lg shadow-[#8c5a3c]/10 p-6 sm:p-7 space-y-4">
+        <div>
+          <h2 class="text-base font-bold text-[#4b2e2b]">Manage Courses</h2>
+          <p class="text-xs text-[#8c5a3c]">Create courses visible to students for enrollment</p>
+        </div>
+
+        <form id="create-course-form" class="flex gap-2">
+          <input id="course-name-input" type="text" placeholder="e.g. Design Patterns 101" class="flex-1 rounded-xl border border-[#8c5a3c]/25 bg-[#fff8f0]/40 px-3.5 py-2.5 text-sm text-[#4b2e2b] focus:bg-white focus:ring-2 focus:ring-[#c08552] outline-none" />
+          <button type="submit" class="bg-[#c08552] hover:bg-[#8c5a3c] text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition shadow-sm">
+            Create
+          </button>
+        </form>
+
+        <div id="lecturer-courses-list" class="space-y-2.5 max-h-72 overflow-y-auto pr-1"></div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Post-Recording Attendance Report Modal -->
+  <div id="session-report-modal" class="hidden fixed inset-0 z-50 bg-[#4b2e2b]/50 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-[#fff8f0] border-2 border-[#8c5a3c]/30 rounded-2xl shadow-2xl max-w-md w-full p-6 sm:p-7 space-y-5">
+      <div class="flex items-start justify-between gap-3">
+        <div>
+          <span id="report-status-pill" class="inline-block px-3 py-1 rounded-full text-xs font-semibold bg-[#c08552]/20 text-[#4b2e2b] mb-2">
+            Session Report
+          </span>
+          <h3 id="report-course-title" class="text-xl font-bold text-[#4b2e2b]">Attendance Summary</h3>
+          <p id="report-subtitle" class="text-xs text-[#8c5a3c] mt-0.5"></p>
+        </div>
+        <button id="close-report-modal-btn" class="text-[#8c5a3c] hover:text-[#4b2e2b] text-sm font-bold px-2.5 py-1 rounded-xl hover:bg-white transition">
+          ✕
+        </button>
+      </div>
+
+      <div class="grid grid-cols-2 gap-4">
+        <div class="bg-white rounded-2xl border border-[#8c5a3c]/20 p-4 text-center shadow-sm">
+          <p class="text-xs font-semibold text-[#8c5a3c] uppercase tracking-wide">Total Students Detected</p>
+          <p id="report-total-detected" class="font-mono text-3xl font-bold text-[#4b2e2b] mt-2">0</p>
+        </div>
+        <div class="bg-white rounded-2xl border border-[#8c5a3c]/20 p-4 text-center shadow-sm">
+          <p class="text-xs font-semibold text-[#8c5a3c] uppercase tracking-wide">Students Who Left Early</p>
+          <p id="report-left-early" class="font-mono text-3xl font-bold text-[#c08552] mt-2">0</p>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-2xl border border-[#8c5a3c]/20 px-4 py-3 flex items-center justify-between text-xs text-[#4b2e2b]">
+        <span>Eligible Present: <strong id="report-present-count" class="font-mono">0</strong></span>
+        <span>Attendance Rate: <strong id="report-rate-percent" class="font-mono">0%</strong></span>
+        <span>Duration: <strong id="report-duration-min" class="font-mono">0m</strong></span>
+      </div>
+
+      <div class="flex items-center gap-3 pt-1">
+        <button id="report-download-csv-btn" class="flex-1 bg-[#c08552] hover:bg-[#8c5a3c] text-white text-sm font-semibold py-2.5 rounded-2xl transition shadow-sm">
+          Download CSV
+        </button>
+        <button id="report-modal-done-btn" class="px-5 bg-white border border-[#8c5a3c]/30 hover:border-[#c08552] text-[#4b2e2b] text-sm font-semibold py-2.5 rounded-2xl transition">
+          Close
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/static/js/lecturer.js"></script>
+</body>
+</html>
