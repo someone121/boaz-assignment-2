@@ -2,7 +2,7 @@
 
 **Course:** Introduction to Software Engineering (Ex2 — OOP / OOD)  
 **Institution:** Ariel University  
-**Authors:** Ron Perelman (212418735) & Shlomo Tousieh Cohen (331294710)
+**Authors:** Ron Perelman (212418735) & Shlomo Toussia-Cohen (331294710)
 
 ---
 
