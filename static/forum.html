@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>SmartClass AI — Class Q&amp;A &amp; Summaries</title>
+  <title>SmartClass AI — Course Forum</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
@@ -39,8 +39,8 @@
           SC
         </div>
         <div>
-          <h1 class="text-base font-bold text-[#4b2e2b]">Class Q&amp;A &amp; AI Summaries</h1>
-          <p id="forum-ws-status" class="text-xs text-[#8c5a3c]">Live feed</p>
+          <h1 class="text-base font-bold text-[#4b2e2b]">Course Forum</h1>
+          <p id="forum-user-label" class="text-xs text-[#8c5a3c]">Discussions &amp; replies</p>
         </div>
       </div>
       <div class="flex items-center gap-2">
@@ -53,40 +53,36 @@
 
   <main class="max-w-4xl mx-auto px-4 sm:px-6 py-7 space-y-6">
 
-    <!-- New Post Composer -->
-    <section class="bg-white rounded-2xl border border-[#8c5a3c]/15 shadow-lg shadow-[#8c5a3c]/10 p-6 sm:p-7">
-      <h2 class="text-base font-bold text-[#4b2e2b] mb-4">Ask a Question or Share a Class Note</h2>
+    <!-- Course Selector -->
+    <section class="bg-white rounded-2xl border border-[#8c5a3c]/15 shadow-lg shadow-[#8c5a3c]/10 p-5 sm:p-6">
+      <div class="flex items-center justify-between gap-3 mb-3">
+        <h2 class="text-sm font-bold text-[#4b2e2b]">Your Courses</h2>
+        <span id="forum-course-count" class="text-xs text-[#8c5a3c]"></span>
+      </div>
+      <div id="forum-course-tabs" role="tablist" aria-label="Select a course" class="flex flex-wrap gap-2">
+        <span class="text-xs text-[#8c5a3c]">Loading your courses...</span>
+      </div>
+    </section>
+
+    <!-- New Thread Composer (hidden until a course is selected) -->
+    <section id="forum-composer" class="hidden bg-white rounded-2xl border border-[#8c5a3c]/15 shadow-lg shadow-[#8c5a3c]/10 p-6 sm:p-7">
+      <h2 class="text-base font-bold text-[#4b2e2b] mb-1">Start a Discussion</h2>
+      <p class="text-xs text-[#8c5a3c] mb-4">
+        Posting in <span id="forum-composer-course" class="font-semibold text-[#4b2e2b]"></span>
+      </p>
       <form id="forum-post-form" class="space-y-3.5">
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <input id="forum-author-name" type="text" required placeholder="Your Name" class="rounded-2xl border border-[#8c5a3c]/25 bg-[#fff8f0]/40 px-4 py-2.5 text-sm text-[#4b2e2b] focus:bg-white focus:ring-2 focus:ring-[#c08552] outline-none transition" />
-          <select id="forum-author-role" class="rounded-2xl border border-[#8c5a3c]/25 bg-[#fff8f0]/40 px-4 py-2.5 text-sm text-[#4b2e2b] focus:bg-white focus:ring-2 focus:ring-[#c08552] outline-none transition">
-            <option value="student">Student</option>
-            <option value="lecturer">Lecturer</option>
-          </select>
-          <select id="forum-post-type" class="rounded-2xl border border-[#8c5a3c]/25 bg-[#fff8f0]/40 px-4 py-2.5 text-sm text-[#4b2e2b] focus:bg-white focus:ring-2 focus:ring-[#c08552] outline-none transition">
-            <option value="question">Question</option>
-            <option value="note">Class Note / Suggestion</option>
-          </select>
-        </div>
-        <textarea id="forum-content" rows="3" placeholder="Write your question, insight, or lecture note..." class="w-full rounded-2xl border border-[#8c5a3c]/25 bg-[#fff8f0]/40 px-4 py-3 text-sm text-[#4b2e2b] placeholder:text-[#8c5a3c]/50 focus:bg-white focus:ring-2 focus:ring-[#c08552] outline-none transition"></textarea>
+        <input id="forum-post-title" type="text" maxlength="200" placeholder="Thread title" class="w-full rounded-2xl border border-[#8c5a3c]/25 bg-[#fff8f0]/40 px-4 py-2.5 text-sm text-[#4b2e2b] placeholder:text-[#8c5a3c]/50 focus:bg-white focus:ring-2 focus:ring-[#c08552] outline-none transition" />
+        <textarea id="forum-post-content" rows="3" maxlength="10000" placeholder="Ask a question, share an insight, or start a conversation..." class="w-full rounded-2xl border border-[#8c5a3c]/25 bg-[#fff8f0]/40 px-4 py-3 text-sm text-[#4b2e2b] placeholder:text-[#8c5a3c]/50 focus:bg-white focus:ring-2 focus:ring-[#c08552] outline-none transition"></textarea>
         <div class="flex justify-end">
-          <button type="submit" class="bg-[#c08552] hover:bg-[#8c5a3c] text-white text-sm font-semibold px-6 py-2.5 rounded-2xl transition shadow-md shadow-[#c08552]/20">
-            Post to Class Feed
+          <button id="forum-post-submit" type="submit" class="bg-[#c08552] hover:bg-[#8c5a3c] disabled:opacity-60 disabled:cursor-not-allowed text-white text-sm font-semibold px-6 py-2.5 rounded-2xl transition shadow-md shadow-[#c08552]/20">
+            Post Thread
           </button>
         </div>
       </form>
     </section>
 
-    <!-- Filter Chips -->
-    <div class="flex flex-wrap gap-2">
-      <button data-filter="all" class="forum-filter-btn px-4 py-2 rounded-full text-xs font-semibold bg-[#4b2e2b] text-[#fff8f0] transition shadow-sm">All</button>
-      <button data-filter="question" class="forum-filter-btn px-4 py-2 rounded-full text-xs font-semibold bg-white border border-[#8c5a3c]/20 text-[#8c5a3c] hover:text-[#4b2e2b] transition">Questions</button>
-      <button data-filter="ai_summary" class="forum-filter-btn px-4 py-2 rounded-full text-xs font-semibold bg-white border border-[#8c5a3c]/20 text-[#8c5a3c] hover:text-[#4b2e2b] transition">AI Summaries</button>
-      <button data-filter="note" class="forum-filter-btn px-4 py-2 rounded-full text-xs font-semibold bg-white border border-[#8c5a3c]/20 text-[#8c5a3c] hover:text-[#4b2e2b] transition">Notes</button>
-    </div>
-
-    <!-- Chronological Feed -->
-    <section id="forum-feed" class="space-y-4"></section>
+    <!-- Threads -->
+    <section id="forum-feed" class="space-y-4" aria-live="polite"></section>
 
   </main>
 

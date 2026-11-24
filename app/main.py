@@ -2,6 +2,7 @@
 
 from contextlib import asynccontextmanager
 import hashlib
+import logging
 import uuid
 
 from fastapi import Depends, FastAPI, HTTPException, status
@@ -24,28 +25,75 @@ from app.schemas import (
 )
 from app.services.attendance_service import attendance_manager
 
+logger = logging.getLogger(__name__)
+
+
+DEFAULT_COURSE_NAMES = (
+    "Introduction to Software Engineering (I2SE)",
+    "Object-Oriented Programming (OOP)",
+    "Algorithms & Data Structures",
+)
+
 
 def _seed_default_courses() -> None:
     """Populate sample academic courses on first run so students can request enrollment."""
     db = SessionLocal()
     try:
         if db.query(Course).count() == 0:
-            for name in (
-                "Introduction to Software Engineering (I2SE)",
-                "Object-Oriented Programming (OOP)",
-                "Algorithms & Data Structures",
-            ):
+            for name in DEFAULT_COURSE_NAMES:
                 db.add(Course(id=str(uuid.uuid4()), name=name, created_at=utcnow()))
             db.commit()
     finally:
         db.close()
 
 
+def _seed_default_lecturer() -> None:
+    """Create the env-configured default lecturer and give them the unassigned default courses.
+
+    Only creates the user if the ID is free; an existing lecturer's password is left as-is.
+    """
+    lecturer_id = settings.DEFAULT_LECTURER_ID.strip()
+    if not lecturer_id:
+        return
+
+    db = SessionLocal()
+    try:
+        lecturer = db.get(User, lecturer_id)
+        if lecturer is None:
+            lecturer = User(
+                user_id=lecturer_id,
+                full_name=settings.DEFAULT_LECTURER_NAME,
+                role="lecturer",
+                password_hash=_hash_password(settings.DEFAULT_LECTURER_PASSWORD),
+                is_approved=True,
+            )
+            db.add(lecturer)
+            # SessionLocal has autoflush=False: write the user before the bulk UPDATE
+            # below references it, or SQLite's foreign key check fails.
+            db.flush()
+        elif lecturer.role != "lecturer":
+            # ID is taken by a student; never promote them silently.
+            logger.warning(
+                "DEFAULT_LECTURER_ID %s belongs to a non-lecturer user; skipping default lecturer seed.",
+                lecturer_id,
+            )
+            return
+
+        db.query(Course).filter(
+            Course.name.in_(DEFAULT_COURSE_NAMES),
+            Course.lecturer_id.is_(None),
+        ).update({Course.lecturer_id: lecturer_id}, synchronize_session=False)
+        db.commit()
+    finally:
+        db.close()
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    """Initialize SQLite schema, seed sample courses, and ensure directories exist."""
+    """Initialize SQLite schema, seed sample courses + default lecturer, and ensure directories exist."""
     init_db()
     _seed_default_courses()
+    _seed_default_lecturer()
     yield
 
 
@@ -76,6 +124,7 @@ app.include_router(courses.router)
 app.include_router(quiz.router)
 app.include_router(polls.router)
 app.include_router(forum.router)
+app.include_router(forum.course_forum_router)
 app.include_router(ai.router)
 app.include_router(ws.router)
 

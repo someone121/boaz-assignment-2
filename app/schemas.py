@@ -38,6 +38,13 @@ class CourseCreate(BaseModel):
     lecturer_id: Optional[str] = None
 
 
+class CourseLecturerUpdate(BaseModel):
+    """Reassign a course to another lecturer."""
+
+    acting_lecturer_id: str = Field(..., min_length=1, max_length=20)
+    lecturer_id: str = Field(..., min_length=1, max_length=20)
+
+
 class CourseResponse(BaseModel):
     """Serialized course with optional student enrollment status."""
 
@@ -172,6 +179,7 @@ class ForumPostResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    course_id: Optional[str] = None
     session_id: Optional[str] = None
     course_name: str
     author_id: Optional[str] = None
@@ -179,8 +187,54 @@ class ForumPostResponse(BaseModel):
     author_role: str
     post_type: str
     recipient_id: Optional[str] = None
+    title: Optional[str] = None
     content: str
     created_at: datetime
+
+
+class CoursePostCreate(BaseModel):
+    """Create a new discussion thread inside a course forum."""
+
+    author_id: str = Field(..., min_length=1, max_length=20)
+    title: str = Field(..., min_length=1, max_length=200)
+    content: str = Field(..., min_length=1, max_length=10000)
+
+
+class ForumCommentCreate(BaseModel):
+    """Add a reply to a course discussion thread."""
+
+    author_id: str = Field(..., min_length=1, max_length=20)
+    content: str = Field(..., min_length=1, max_length=5000)
+
+
+class ForumCommentResponse(BaseModel):
+    """Serialized reply on a course discussion thread."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    post_id: int
+    author_id: str
+    author_name: str
+    author_role: str
+    content: str
+    created_at: datetime
+
+
+class CoursePostResponse(BaseModel):
+    """Serialized course discussion thread with its nested replies."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    course_id: str
+    author_id: Optional[str] = None
+    author_name: str
+    author_role: str
+    title: str
+    content: str
+    created_at: datetime
+    comments: list[ForumCommentResponse] = []
 
 
 class HomeworkReviewRequest(BaseModel):

@@ -272,6 +272,12 @@ class TimedTokenManager:
 | `POST` | `/api/poll/vote` | Submits a vote for an active poll. |
 | `POST` | `/api/ai/summarize-lecture` | Uploads transcript/audio for LLM summary generation. |
 | `POST` | `/api/ai/review-homework` | Submits repository links for automated comparative code review. |
+| `PATCH` | `/api/courses/{course_id}/lecturer` | Reassigns a course to another existing lecturer. Body: `{ acting_lecturer_id, lecturer_id }`. Only lecturers may call it. |
+| `GET` | `/api/courses/{course_id}/posts?user_id=…` | Course forum threads with nested replies. Only the course's lecturer or approved students. |
+| `POST` | `/api/courses/{course_id}/posts` | Creates a forum thread. Body: `{ author_id, title, content }`. |
+| `POST` | `/api/posts/{post_id}/comments` | Replies to a thread. Body: `{ author_id, content }`. |
+
+Course forum access is checked on the server: the caller's role is looked up in the `users` table (never taken from the request), lecturers must match `courses.lecturer_id`, and students need an `approved` row in `enrollments`. Otherwise the response is `403`.
 
 ---
 

@@ -61,10 +61,15 @@ Single-page tabbed interface connected via WebSocket on page load:
   - On `200 OK`: Replaces form with green confirmation badge ("Response Recorded").
   - On `403 / 410 Gone` (Axios error interceptor): Displays clear warning ("The 5-minute submission window has closed").
 
-### 3.3 `forum.html` (Class Blog & Real-Time Suggestions)
-- Simple chronological feed of student questions and instructor notes.
-- Form at the top to submit a new post (`POST /api/forum/posts`).
-- Listens to WebSocket `NEW_FORUM_POST` event to prepend new posts live for all connected clients.
+### 3.3 `forum.html` (Course Forum: Threads & Replies)
+- **Plain REST over Axios, no WebSockets** (KISS). The page does not refresh by itself; new content from others appears when the course is reopened or the page is reloaded.
+- **Course tabs:** Lists only the courses the logged-in user teaches (lecturers, `lecturer_id` match) or is approved for (students, `enrollment_status === "approved"`). The last opened course is remembered in `localStorage` (`smartclass_forum_course`).
+- **Thread list:** `GET /api/courses/{course_id}/posts?user_id=…` returns the course's threads (newest first), each with its nested replies (oldest first).
+- **New thread:** Title + message form → `POST /api/courses/{course_id}/posts`.
+- **Replies:** Inline "Add a reply..." input under every thread → `POST /api/posts/{post_id}/comments`.
+- New threads and replies are inserted into the page from the API response straight away (no full re-render), followed by a toast.
+- Empty state when a course has no threads: "No discussions in this course yet. Start the conversation!"
+- Users who are not logged in are shown a link to `/login`.
 
 ---
 
@@ -76,4 +81,4 @@ Single-page tabbed interface connected via WebSocket on page load:
 | `POLL_UPDATE` | Server -> Client | `{ poll_id, results: { opt1, opt2 } }` | Re-render Chart.js dataset |
 | `SUMMARY_READY` | Server -> Client | `{ session_id, markdown_summary }` | Hide spinner and display AI lecture summary |
 | `ATTENDANCE_DONE` | Server -> Client | `{ download_url, total_present }` | Show toast notification with direct CSV link |
-| `NEW_FORUM_POST` | Server -> Client | `{ id, author, content, timestamp }` | Prepend new card to `forum.html` feed |
+| `NEW_FORUM_POST` | Server -> Client | `{ id, author, content, timestamp }` | Legacy global feed only (AI summaries via `/api/forum/posts`). `forum.html` no longer listens to it. |

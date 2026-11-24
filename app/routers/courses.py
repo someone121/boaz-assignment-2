@@ -10,6 +10,7 @@ from app.database import get_db
 from app.models import Course, Enrollment, Student, User, utcnow
 from app.schemas import (
     CourseCreate,
+    CourseLecturerUpdate,
     CourseResponse,
     EnrollApproveRequest,
     EnrollmentResponse,
@@ -64,6 +65,42 @@ def create_course(payload: CourseCreate, db: Session = Depends(get_db)) -> Cours
         name=course.name,
         lecturer_id=course.lecturer_id,
         lecturer_name=lecturer.full_name if lecturer else "Course Instructor",
+        enrollment_status=None,
+        created_at=course.created_at,
+    )
+
+
+@router.patch("/courses/{course_id}/lecturer", response_model=CourseResponse)
+def reassign_course_lecturer(
+    course_id: str, payload: CourseLecturerUpdate, db: Session = Depends(get_db)
+) -> CourseResponse:
+    """Let a lecturer reassign a course to another (existing) lecturer."""
+    course = db.get(Course, course_id)
+    if course is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found.")
+
+    acting = db.get(User, payload.acting_lecturer_id.strip())
+    if acting is None or acting.role != "lecturer":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only lecturers can reassign courses.",
+        )
+
+    new_lecturer = db.get(User, payload.lecturer_id.strip())
+    if new_lecturer is None or new_lecturer.role != "lecturer":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Target lecturer not found. They must log in once as a lecturer first.",
+        )
+
+    course.lecturer_id = new_lecturer.user_id
+    db.commit()
+    db.refresh(course)
+    return CourseResponse(
+        id=course.id,
+        name=course.name,
+        lecturer_id=course.lecturer_id,
+        lecturer_name=new_lecturer.full_name,
         enrollment_status=None,
         created_at=course.created_at,
     )

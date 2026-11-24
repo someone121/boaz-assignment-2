@@ -10,6 +10,10 @@ services:
       - DATABASE_URL=sqlite:///./data/smartclass.db
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - SECRET_KEY=${SECRET_KEY:-supersecret_kiss_key}
+      # Default lecturer seeded on startup and assigned to the 3 default courses.
+      - DEFAULT_LECTURER_ID=111111111
+      - DEFAULT_LECTURER_NAME=Default Lecturer
+      - DEFAULT_LECTURER_PASSWORD=admin123
     volumes:
       - ./app:/app/app
       - ./static:/app/static
