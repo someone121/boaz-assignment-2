@@ -187,11 +187,18 @@ class PollVote(Base):
 
 
 class ForumPost(Base):
-    """Class Q&A / blog feed entry, AI summary post, or private student-lecturer message."""
+    """Course discussion thread, AI summary post, or private student-lecturer message.
+
+    Course-scoped threads set ``course_id`` and ``title``; legacy feed entries
+    (AI summaries, private messages) leave both NULL.
+    """
 
     __tablename__ = "forum_posts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    course_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("courses.id"), nullable=True, index=True
+    )
     session_id: Mapped[Optional[str]] = mapped_column(ForeignKey("sessions.id"), nullable=True)
     course_name: Mapped[str] = mapped_column(String(100), nullable=False, default="General")
     author_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
@@ -199,8 +206,33 @@ class ForumPost(Base):
     author_role: Mapped[str] = mapped_column(String(20), nullable=False, default="student")
     post_type: Mapped[str] = mapped_column(String(30), nullable=False, default="question")
     recipient_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    title: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+
+    comments: Mapped[list["ForumComment"]] = relationship(
+        back_populates="post",
+        order_by="ForumComment.created_at",
+        cascade="all, delete-orphan",
+    )
+
+
+class ForumComment(Base):
+    """Reply attached to a course discussion thread."""
+
+    __tablename__ = "forum_comments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    post_id: Mapped[int] = mapped_column(
+        ForeignKey("forum_posts.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    author_id: Mapped[str] = mapped_column(String(20), nullable=False)
+    author_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    author_role: Mapped[str] = mapped_column(String(20), nullable=False, default="student")
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+
+    post: Mapped["ForumPost"] = relationship(back_populates="comments")
 
 
 class LectureSummary(Base):

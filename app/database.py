@@ -64,3 +64,17 @@ def init_db() -> None:
                 conn.exec_driver_sql(
                     "ALTER TABLE sessions ADD COLUMN students_left_early INTEGER NOT NULL DEFAULT 0"
                 )
+
+            # Course-scoped forum threads (added for course-based forum categorization).
+            forum_cols = {
+                row[1] for row in conn.exec_driver_sql("PRAGMA table_info(forum_posts)").fetchall()
+            }
+            if "course_id" not in forum_cols:
+                conn.exec_driver_sql(
+                    "ALTER TABLE forum_posts ADD COLUMN course_id VARCHAR(36) REFERENCES courses(id)"
+                )
+                conn.exec_driver_sql(
+                    "CREATE INDEX IF NOT EXISTS ix_forum_posts_course_id ON forum_posts (course_id)"
+                )
+            if "title" not in forum_cols:
+                conn.exec_driver_sql("ALTER TABLE forum_posts ADD COLUMN title VARCHAR(200)")

@@ -136,6 +136,23 @@ export const api = {
     return apiClient.post("/api/forum/posts", payload).then((r) => r.data);
   },
 
+  // Course Forum (REST: threads + replies scoped to a course)
+  listCoursePosts(courseId, userId) {
+    return apiClient
+      .get(`/api/courses/${encodeURIComponent(courseId)}/posts`, { params: { user_id: userId } })
+      .then((r) => r.data);
+  },
+  createCoursePost(courseId, payload) {
+    return apiClient
+      .post(`/api/courses/${encodeURIComponent(courseId)}/posts`, payload)
+      .then((r) => r.data);
+  },
+  createPostComment(postId, payload) {
+    return apiClient
+      .post(`/api/posts/${encodeURIComponent(postId)}/comments`, payload)
+      .then((r) => r.data);
+  },
+
   // AI Workflows
   summarizeLecture(file, sessionId, courseName, onUploadProgress) {
     const formData = new FormData();
