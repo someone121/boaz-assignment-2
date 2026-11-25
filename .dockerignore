@@ -12,3 +12,6 @@ reports/*
 !reports/.gitkeep
 .git/
 *.pt
+.env
+.env.*
+!.env.example
