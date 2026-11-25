@@ -2,41 +2,7 @@
 
 from concurrent.futures import ThreadPoolExecutor
 
-from fastapi.testclient import TestClient
 import openpyxl
-import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-
-import app.models  # noqa: F401
-from app.database import Base, get_db
-from app.main import app as fastapi_app
-
-
-@pytest.fixture()
-def client(tmp_path):
-    """Provide a FastAPI TestClient backed by an isolated temporary SQLite database."""
-    db_file = tmp_path / "test_smartclass.db"
-    engine = create_engine(
-        f"sqlite:///{db_file.as_posix()}",
-        connect_args={"check_same_thread": False},
-    )
-
-    Base.metadata.create_all(bind=engine)
-    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-    def override_get_db():
-        db = TestingSessionLocal()
-        try:
-            yield db
-        finally:
-            db.close()
-
-    fastapi_app.dependency_overrides[get_db] = override_get_db
-    with TestClient(fastapi_app) as test_client:
-        yield test_client
-    fastapi_app.dependency_overrides.clear()
-    engine.dispose()
 
 
 def test_full_classroom_workflow(client, tmp_path):
