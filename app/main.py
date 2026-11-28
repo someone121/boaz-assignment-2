@@ -162,8 +162,9 @@ def lecturer_dashboard_page() -> FileResponse:
 @app.get("/student_dashboard", include_in_schema=False)
 @app.get("/live", include_in_schema=False)
 @app.get("/s/{token}", include_in_schema=False)
+@app.get("/checkin/{token}", include_in_schema=False)
 def student_dashboard_page(token: str | None = None) -> FileResponse:
-    """Serve the Mobile-First Student Dashboard (direct or via QR /s/{token})."""
+    """Serve the Mobile-First Student Dashboard (direct or via QR /s/{token} or /checkin/{token})."""
     return _serve_static_page("student_dashboard.html")
 
 
@@ -182,6 +183,15 @@ def health_check(db: Session = Depends(get_db)) -> dict:
         "app": settings.APP_NAME,
         "version": settings.APP_VERSION,
         "database": "connected",
+    }
+
+
+@app.get("/api/config", tags=["Core"])
+def get_public_config() -> dict:
+    """Return frontend runtime configuration such as PUBLIC_BASE_URL for QR links."""
+    return {
+        "public_base_url": settings.PUBLIC_BASE_URL,
+        "demo_mode": settings.DEMO_MODE,
     }
 
 
@@ -295,6 +305,7 @@ def get_session_report(session_id: str, db: Session = Depends(get_db)) -> Sessio
 
     rows = attendance_manager.evaluate_attendance(db, session_id)
     is_mock = False
+    no_data = False
 
     if rows:
         total_detected = len(rows)
@@ -307,12 +318,16 @@ def get_session_report(session_id: str, db: Session = Depends(get_db)) -> Sessio
         total_detected = lecture.total_detected
         students_left_early = lecture.students_left_early
         total_present = max(0, total_detected - students_left_early)
-    else:
-        # Provide deterministic demo statistics when no CV frames have been uploaded yet.
+    elif settings.DEMO_MODE:
         is_mock = True
         total_detected = 24
         students_left_early = 3
         total_present = 21
+    else:
+        no_data = True
+        total_detected = 0
+        students_left_early = 0
+        total_present = 0
 
     duration_minutes = lecture.total_duration_minutes or max(
         1, int(((lecture.end_time or utcnow()) - lecture.start_time).total_seconds() // 60)
@@ -328,5 +343,6 @@ def get_session_report(session_id: str, db: Session = Depends(get_db)) -> Sessio
         students_left_early=students_left_early,
         total_present=total_present,
         attendance_rate_percent=rate,
+        no_data=no_data,
         is_mock_data=is_mock,
     )

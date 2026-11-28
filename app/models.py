@@ -105,6 +105,32 @@ class AttendanceRecord(Base):
     student: Mapped[Optional["Student"]] = relationship(back_populates="attendance_records")
 
 
+class ActiveCheckInToken(Base):
+    """Short-lived QR token for student self check-in."""
+
+    __tablename__ = "active_checkin_tokens"
+
+    token: Mapped[str] = mapped_column(String(64), primary_key=True)
+    session_id: Mapped[str] = mapped_column(ForeignKey("sessions.id"), nullable=False)
+    lecturer_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+
+class AttendanceCheckIn(Base):
+    """Student self check-in record for a lecture session."""
+
+    __tablename__ = "attendance_checkins"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(ForeignKey("sessions.id"), nullable=False, index=True)
+    student_id: Mapped[str] = mapped_column(ForeignKey("students.student_id"), nullable=False)
+    student_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    token: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    checked_in_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+
+
 class QuizQuestion(Base):
     """Question bank imported from lecturer Excel (.xlsx) files."""
 
@@ -208,6 +234,7 @@ class ForumPost(Base):
     recipient_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     title: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    is_read: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
 
     comments: Mapped[list["ForumComment"]] = relationship(
@@ -255,9 +282,13 @@ class HomeworkReview(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     session_id: Mapped[Optional[str]] = mapped_column(ForeignKey("sessions.id"), nullable=True)
+    student_id: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
     submission_label: Mapped[str] = mapped_column(String(100), nullable=False)
     repo_url: Mapped[str] = mapped_column(String(500), nullable=False)
     score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     ood_feedback: Mapped[str] = mapped_column(Text, nullable=False)
     comparative_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    rubric_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    similarity_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    analysis_mode: Mapped[str] = mapped_column(String(30), nullable=False, default="static_non_llm")
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)

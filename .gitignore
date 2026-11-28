@@ -13,7 +13,7 @@ env/
 .env
 .env.*
 !.env.example
-
+certs/*.crt
 # SQLite database files
 *.db
 *.sqlite

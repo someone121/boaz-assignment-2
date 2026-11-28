@@ -78,3 +78,22 @@ def init_db() -> None:
                 )
             if "title" not in forum_cols:
                 conn.exec_driver_sql("ALTER TABLE forum_posts ADD COLUMN title VARCHAR(200)")
+            if "is_read" not in forum_cols:
+                conn.exec_driver_sql(
+                    "ALTER TABLE forum_posts ADD COLUMN is_read BOOLEAN NOT NULL DEFAULT 0"
+                )
+
+            hw_cols = {
+                row[1]
+                for row in conn.exec_driver_sql("PRAGMA table_info(homework_reviews)").fetchall()
+            }
+            if "student_id" not in hw_cols:
+                conn.exec_driver_sql("ALTER TABLE homework_reviews ADD COLUMN student_id VARCHAR(40)")
+            if "rubric_json" not in hw_cols:
+                conn.exec_driver_sql("ALTER TABLE homework_reviews ADD COLUMN rubric_json TEXT")
+            if "similarity_json" not in hw_cols:
+                conn.exec_driver_sql("ALTER TABLE homework_reviews ADD COLUMN similarity_json TEXT")
+            if "analysis_mode" not in hw_cols:
+                conn.exec_driver_sql(
+                    "ALTER TABLE homework_reviews ADD COLUMN analysis_mode VARCHAR(30) NOT NULL DEFAULT 'static_non_llm'"
+                )

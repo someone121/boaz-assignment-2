@@ -6,6 +6,8 @@ import { api } from "./api.js";
 import { escapeHtml, renderEmptyState, showToast } from "./ui.js";
 import { SmartClassSocket } from "./ws.js";
 
+const OFFLINE_QUEUE_KEY = "smartclass_offline_queue";
+
 const currentUser = JSON.parse(localStorage.getItem("smartclass_user") || "null");
 if (!currentUser || currentUser.role !== "student") {
   const next = encodeURIComponent(window.location.pathname + window.location.search);
@@ -15,6 +17,7 @@ if (!currentUser || currentUser.role !== "student") {
 const state = {
   student: currentUser,
   token: null,
+  checkinToken: null,
   sessionId: null,
   quizTimer: null,
   ws: new SmartClassSocket("global"),
@@ -25,6 +28,13 @@ function getTokenFromPath() {
   if (match) return decodeURIComponent(match[1]);
   const params = new URLSearchParams(window.location.search);
   return params.get("token");
+}
+
+function getCheckInTokenFromPath() {
+  const match = window.location.pathname.match(/\/checkin\/([^/]+)/);
+  if (match) return decodeURIComponent(match[1]);
+  const params = new URLSearchParams(window.location.search);
+  return params.get("checkin");
 }
 
 function initStudentIdentity() {
@@ -38,6 +48,45 @@ function initStudentIdentity() {
     localStorage.removeItem("smartclass_student");
     window.location.href = "/";
   });
+}
+
+async function initCheckInCard() {
+  state.checkinToken = getCheckInTokenFromPath();
+  if (!state.checkinToken) return;
+
+  const card = document.getElementById("checkin-card");
+  try {
+    const info = await api.getCheckInDetails(state.checkinToken);
+    state.sessionId = info.session_id;
+    card.classList.remove("hidden");
+    document.getElementById("checkin-course-title").textContent = info.course_name;
+    const mins = Math.floor((info.seconds_remaining || 0) / 60);
+    const secs = String((info.seconds_remaining || 0) % 60).padStart(2, "0");
+    document.getElementById("checkin-timer-text").textContent = `${mins}:${secs} remaining`;
+
+    document.getElementById("checkin-submit-btn").addEventListener("click", async () => {
+      try {
+        const res = await api.submitAttendanceCheckIn({
+          token: state.checkinToken,
+          student_id: state.student.id_number || state.student.user_id,
+          full_name: state.student.full_name || "Student",
+        });
+        document.getElementById("checkin-submit-btn").classList.add("hidden");
+        const done = document.getElementById("checkin-done-banner");
+        done.textContent = `Checked in at ${new Date(res.checked_in_at).toLocaleTimeString()}`;
+        done.classList.remove("hidden");
+        showToast("Attendance marked!", "success");
+      } catch (err) {
+        showToast(err.friendlyMessage || "Check-in failed or expired", "error");
+      }
+    });
+  } catch (err) {
+    card.classList.remove("hidden");
+    document.getElementById("checkin-submit-btn").classList.add("hidden");
+    const done = document.getElementById("checkin-done-banner");
+    done.textContent = err.friendlyMessage || "This attendance check-in QR has expired.";
+    done.classList.remove("hidden");
+  }
 }
 
 function renderCourses(courses) {
@@ -168,14 +217,20 @@ function renderActivePoll(poll) {
     return;
   }
 
+  const isClosed = poll.is_open === false;
   const options = poll.options || Object.keys(poll.results || {});
   container.innerHTML = `
-    <p class="font-semibold text-[#4b2e2b] mb-3">${escapeHtml(poll.prompt)}</p>
+    <div class="flex items-center justify-between gap-2 mb-3">
+      <p class="font-semibold text-[#4b2e2b]">${escapeHtml(poll.prompt)}</p>
+      ${isClosed ? `<span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#4b2e2b] text-[#fff8f0] shrink-0">Poll Closed</span>` : ""}
+    </div>
     <div class="space-y-2.5">
       ${options
         .map(
           (opt) => `
-        <button data-opt="${escapeHtml(opt)}" class="poll-vote-btn w-full min-h-[48px] flex items-center justify-between rounded-2xl border border-[#8c5a3c]/20 bg-[#fff8f0]/40 hover:border-[#c08552] hover:bg-[#c08552]/15 px-4 py-2.5 text-sm font-medium text-[#4b2e2b] transition">
+        <button data-opt="${escapeHtml(opt)}" ${isClosed ? "disabled" : ""} class="poll-vote-btn w-full min-h-[48px] flex items-center justify-between rounded-2xl border border-[#8c5a3c]/20 bg-[#fff8f0]/40 ${
+            isClosed ? "opacity-60 cursor-not-allowed" : "hover:border-[#c08552] hover:bg-[#c08552]/15"
+          } px-4 py-2.5 text-sm font-medium text-[#4b2e2b] transition">
           <span>${escapeHtml(opt)}</span>
           <span class="font-mono text-xs font-semibold text-[#8c5a3c]">${poll.results?.[opt] ?? 0}</span>
         </button>`
@@ -184,22 +239,24 @@ function renderActivePoll(poll) {
     </div>
   `;
 
-  container.querySelectorAll(".poll-vote-btn").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const studentId = state.student?.id_number || state.student?.user_id || null;
-      try {
-        const updated = await api.votePoll({
-          poll_id: poll.poll_id,
-          selected_option: btn.dataset.opt,
-          student_id: studentId,
-        });
-        renderActivePoll(updated);
-        showToast("Your poll vote has been recorded!", "success");
-      } catch (err) {
-        showToast(err.friendlyMessage || "Unable to submit vote", "error");
-      }
+  if (!isClosed) {
+    container.querySelectorAll(".poll-vote-btn").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const studentId = state.student?.id_number || state.student?.user_id || null;
+        try {
+          const updated = await api.votePoll({
+            poll_id: poll.poll_id,
+            selected_option: btn.dataset.opt,
+            student_id: studentId,
+          });
+          renderActivePoll(updated);
+          showToast("Your poll vote has been recorded!", "success");
+        } catch (err) {
+          showToast(err.friendlyMessage || "Unable to submit vote", "error");
+        }
+      });
     });
-  });
+  }
 }
 
 async function refreshPolls() {
@@ -223,24 +280,97 @@ async function refreshPolls() {
   }
 }
 
+async function refreshStudentHomeworkReviews() {
+  const studentId = state.student?.id_number || state.student?.user_id;
+  const container = document.getElementById("student-hw-reviews");
+  if (!studentId || !container) return;
+  try {
+    const reviews = await api.listHomeworkReviews(studentId);
+    if (!reviews.length) {
+      container.innerHTML = "";
+      return;
+    }
+    container.innerHTML = reviews
+      .slice(0, 3)
+      .map(
+        (r) => `
+      <div class="rounded-2xl border border-[#8c5a3c]/15 bg-[#fff8f0]/60 p-3.5 space-y-1.5 text-xs">
+        <div class="flex items-center justify-between">
+          <span class="font-bold text-[#4b2e2b]">${escapeHtml(r.submission_label)}</span>
+          <span class="px-2.5 py-0.5 rounded-full font-bold bg-[#c08552]/20 text-[#4b2e2b]">${r.score}/100</span>
+        </div>
+        <p class="text-[#4b2e2b]/90">${escapeHtml(r.ood_feedback)}</p>
+        <p class="text-[#8c5a3c]">${escapeHtml(r.comparative_notes || "")}</p>
+      </div>`
+      )
+      .join("");
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+function getOfflineQueue() {
+  try {
+    return JSON.parse(localStorage.getItem(OFFLINE_QUEUE_KEY) || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function saveOfflineQueue(items) {
+  try {
+    localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(items));
+  } catch {
+    // ignore storage quota failures
+  }
+}
+
+async function flushOfflinePrivateMessages() {
+  const queue = getOfflineQueue();
+  const mine = queue.filter((item) => item.kind === "private_message");
+  if (!mine.length || !navigator.onLine) return;
+
+  const remaining = [];
+  for (const item of queue) {
+    if (item.kind !== "private_message") {
+      remaining.push(item);
+      continue;
+    }
+    try {
+      await api.createForumPost(item.payload);
+    } catch {
+      remaining.push(item);
+    }
+  }
+  saveOfflineQueue(remaining);
+  const badge = document.getElementById("student-offline-badge");
+  if (badge) badge.classList.toggle("hidden", !remaining.some((i) => i.kind === "private_message"));
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
   initStudentIdentity();
+  await initCheckInCard();
   await refreshAvailableCourses();
   await initQuizCard();
   await refreshPolls();
+  await refreshStudentHomeworkReviews();
+  await flushOfflinePrivateMessages();
 
   document.getElementById("refresh-courses-btn").addEventListener("click", refreshAvailableCourses);
   document.getElementById("refresh-poll-btn").addEventListener("click", refreshPolls);
+  window.addEventListener("online", flushOfflinePrivateMessages);
 
   const statusEl = document.getElementById("student-ws-status");
   state.ws.onStatusChange = (s) => {
     statusEl.textContent = s === "connected" ? "Connected live" : "Reconnecting...";
+    if (s === "connected") flushOfflinePrivateMessages();
   };
   state.ws.on("POLL_UPDATE", (data) => {
     renderActivePoll({
       poll_id: data.poll_id,
       prompt: data.prompt || "Live Poll",
       results: data.results,
+      is_open: data.is_open !== false,
     });
   });
   state.ws.connect(state.sessionId || "global");
@@ -274,6 +404,20 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
+  document.getElementById("student-hw-form")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const url = document.getElementById("student-hw-url").value.trim();
+    if (!url) return showToast("Enter a GitHub repository URL.", "warning");
+    try {
+      await api.reviewHomework([url], state.sessionId, state.student.id_number || state.student.user_id);
+      document.getElementById("student-hw-url").value = "";
+      showToast("Homework review ready!", "success");
+      await refreshStudentHomeworkReviews();
+    } catch (err) {
+      showToast(err.friendlyMessage || "Homework review failed", "error");
+    }
+  });
+
   document.getElementById("private-msg-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const content = document.getElementById("private-msg-text").value.trim();
@@ -281,20 +425,31 @@ document.addEventListener("DOMContentLoaded", async () => {
       showToast("Please write a message before sending.", "warning");
       return;
     }
+    const payload = {
+      session_id: state.sessionId,
+      author_id: state.student?.id_number || state.student?.user_id || null,
+      author_name: state.student?.full_name || "Student",
+      author_role: "student",
+      post_type: "private_message",
+      content,
+    };
     try {
-      await api.createForumPost({
-        session_id: state.sessionId,
-        author_id: state.student?.id_number || state.student?.user_id || null,
-        author_name: state.student?.full_name || "Student",
-        author_role: "student",
-        post_type: "private_message",
-        content,
-      });
+      if (!navigator.onLine) throw new Error("offline");
+      await api.createForumPost(payload);
       document.getElementById("private-msg-text").value = "";
       document.getElementById("private-msg-status").classList.remove("hidden");
       showToast("Private message sent to lecturer!", "success");
     } catch (err) {
-      showToast(err.friendlyMessage || "Failed to send message", "error");
+      if (!navigator.onLine || !err.response) {
+        const q = getOfflineQueue();
+        q.push({ kind: "private_message", payload });
+        saveOfflineQueue(q);
+        document.getElementById("private-msg-text").value = "";
+        document.getElementById("student-offline-badge")?.classList.remove("hidden");
+        showToast("Offline — message queued and will send on reconnect.", "warning");
+      } else {
+        showToast(err.friendlyMessage || "Failed to send message", "error");
+      }
     }
   });
 });

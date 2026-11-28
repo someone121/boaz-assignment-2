@@ -76,3 +76,14 @@ def submit_vote(db: Session, poll_id: str, selected_option: str, student_id: str
     db.add(vote)
     db.commit()
     return get_poll_results(db, poll)
+
+
+def close_poll(db: Session, poll_id: str) -> dict:
+    """Close an open poll so no further votes are accepted."""
+    poll = db.get(Poll, poll_id)
+    if poll is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Poll not found.")
+    poll.is_open = False
+    db.commit()
+    db.refresh(poll)
+    return get_poll_results(db, poll)

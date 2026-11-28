@@ -23,12 +23,24 @@ def test_sessions_are_listed_newest_first(client):
     assert ids.index(second) < ids.index(first)
 
 
-def test_report_uses_demo_numbers_before_any_frame(client):
+def test_report_returns_zeros_and_no_data_before_any_frame(client):
+    session_id = start_session(client)
+    report = client.get(f"/api/sessions/{session_id}/report").json()
+    assert report["no_data"] is True
+    assert report["is_mock_data"] is False
+    assert report["total_detected"] == 0
+    assert report["is_active"] is True
+
+
+def test_report_uses_demo_numbers_only_when_demo_mode_enabled(client, monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "DEMO_MODE", True)
     session_id = start_session(client)
     report = client.get(f"/api/sessions/{session_id}/report").json()
     assert report["is_mock_data"] is True
+    assert report["no_data"] is False
     assert report["total_detected"] == 24
-    assert report["is_active"] is True
 
 
 def test_report_for_unknown_session_is_404(client):

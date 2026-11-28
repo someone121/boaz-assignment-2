@@ -9,8 +9,10 @@
 
 import { api } from "./api.js";
 import { escapeHtml, renderEmptyState, showToast } from "./ui.js";
+import { SmartClassSocket } from "./ws.js";
 
 const LAST_COURSE_KEY = "smartclass_forum_course";
+const OFFLINE_QUEUE_KEY = "smartclass_offline_queue";
 
 const state = {
   user: JSON.parse(localStorage.getItem("smartclass_user") || "null"),
@@ -18,6 +20,7 @@ const state = {
   courseId: null,
   posts: [],
   loadToken: 0, // guards against stale responses when switching courses quickly
+  ws: new SmartClassSocket("global"),
 };
 
 const userId = () => state.user?.user_id || state.user?.id_number || null;
@@ -198,6 +201,7 @@ async function selectCourse(courseId) {
   state.courseId = courseId;
   localStorage.setItem(LAST_COURSE_KEY, courseId);
   renderCourseTabs();
+  state.ws.connect(`course:${courseId}`);
 
   const course = currentCourse();
   document.getElementById("forum-composer").classList.remove("hidden");
@@ -242,17 +246,15 @@ async function handleNewPost(e) {
   }
 
   const courseIdAtSubmit = state.courseId;
+  const payload = { author_id: userId(), title, content };
   submitBtn.disabled = true;
   try {
-    const created = await api.createCoursePost(courseIdAtSubmit, {
-      author_id: userId(),
-      title,
-      content,
-    });
+    if (!navigator.onLine) throw new Error("offline");
+    const created = await api.createCoursePost(courseIdAtSubmit, payload);
     titleEl.value = "";
     contentEl.value = "";
 
-    if (state.courseId === courseIdAtSubmit) {
+    if (state.courseId === courseIdAtSubmit && !state.posts.some((p) => p.id === created.id)) {
       const feed = document.getElementById("forum-feed");
       if (!state.posts.length) feed.innerHTML = ""; // clear empty state
       state.posts.unshift(created);
@@ -260,7 +262,14 @@ async function handleNewPost(e) {
     }
     showToast("Discussion posted!", "success");
   } catch (err) {
-    showToast(err.friendlyMessage || "Unable to create post", "error");
+    if (!navigator.onLine || !err.response) {
+      queueOfflineForumAction({ kind: "course_post", courseId: courseIdAtSubmit, payload });
+      titleEl.value = "";
+      contentEl.value = "";
+      showToast("Offline — thread queued and will send on reconnect.", "warning");
+    } else {
+      showToast(err.friendlyMessage || "Unable to create post", "error");
+    }
   } finally {
     submitBtn.disabled = false;
   }
@@ -276,24 +285,107 @@ async function handleReply(form) {
     return;
   }
 
+  const payload = { author_id: userId(), content };
   button.disabled = true;
   try {
-    const comment = await api.createPostComment(postId, { author_id: userId(), content });
+    if (!navigator.onLine) throw new Error("offline");
+    const comment = await api.createPostComment(postId, payload);
     input.value = "";
-
-    const post = state.posts.find((p) => p.id === postId);
-    if (post) {
-      post.comments = post.comments || [];
-      post.comments.push(comment);
-    }
-    const article = form.closest("article");
-    article.querySelector('[data-role="comment-list"]').insertAdjacentHTML("beforeend", renderComment(comment));
-    article.querySelector('[data-role="reply-count"]').textContent = replyCountLabel(post ? post.comments.length : 1);
+    appendCommentToDom(postId, comment);
     showToast("Reply added!", "success");
   } catch (err) {
-    showToast(err.friendlyMessage || "Unable to add reply", "error");
+    if (!navigator.onLine || !err.response) {
+      queueOfflineForumAction({ kind: "course_comment", postId, payload });
+      input.value = "";
+      showToast("Offline — reply queued and will send on reconnect.", "warning");
+    } else {
+      showToast(err.friendlyMessage || "Unable to add reply", "error");
+    }
   } finally {
     button.disabled = false;
+  }
+}
+
+function appendCommentToDom(postId, comment) {
+  const post = state.posts.find((p) => p.id === postId);
+  if (post) {
+    post.comments = post.comments || [];
+    if (post.comments.some((c) => c.id === comment.id)) return;
+    post.comments.push(comment);
+  }
+  const article = document.querySelector(`article[data-post-id="${postId}"]`);
+  if (article) {
+    article.querySelector('[data-role="comment-list"]')?.insertAdjacentHTML("beforeend", renderComment(comment));
+    const countEl = article.querySelector('[data-role="reply-count"]');
+    if (countEl) countEl.textContent = replyCountLabel(post ? post.comments.length : 1);
+  }
+}
+
+function getOfflineQueue() {
+  try {
+    return JSON.parse(localStorage.getItem(OFFLINE_QUEUE_KEY) || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function saveOfflineQueue(items) {
+  try {
+    localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(items));
+  } catch {
+    // ignore storage quota errors
+  }
+}
+
+function updateQueuedBadge() {
+  const label = document.getElementById("forum-user-label");
+  if (!label || !state.user) return;
+  const queuedCount = getOfflineQueue().filter(
+    (i) => i.kind === "course_post" || i.kind === "course_comment"
+  ).length;
+  const base = `Signed in as ${state.user.full_name || userId()} · ${state.user.role === "lecturer" ? "Lecturer" : "Student"}`;
+  label.textContent = queuedCount > 0 ? `${base} · ${queuedCount} queued (offline)` : base;
+}
+
+function queueOfflineForumAction(item) {
+  const q = getOfflineQueue();
+  q.push(item);
+  saveOfflineQueue(q);
+  updateQueuedBadge();
+}
+
+async function flushOfflineForumQueue() {
+  const q = getOfflineQueue();
+  const hasForum = q.some((i) => i.kind === "course_post" || i.kind === "course_comment");
+  if (!hasForum || !navigator.onLine) return;
+
+  const remaining = [];
+  for (const item of q) {
+    if (item.kind === "course_post") {
+      try {
+        const created = await api.createCoursePost(item.courseId, item.payload);
+        if (state.courseId === item.courseId && !state.posts.some((p) => p.id === created.id)) {
+          state.posts.unshift(created);
+          renderFeed();
+        }
+      } catch {
+        remaining.push(item);
+      }
+    } else if (item.kind === "course_comment") {
+      try {
+        const comment = await api.createPostComment(item.postId, item.payload);
+        appendCommentToDom(item.postId, comment);
+      } catch {
+        remaining.push(item);
+      }
+    } else {
+      remaining.push(item);
+    }
+  }
+  saveOfflineQueue(remaining);
+  updateQueuedBadge();
+  if (remaining.length < q.length) {
+    showToast("Queued offline forum items sent!", "success");
   }
 }
 
@@ -309,8 +401,23 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   backLink.href = state.user.role === "lecturer" ? "/lecturer_dashboard" : "/student_dashboard";
-  document.getElementById("forum-user-label").textContent =
-    `Signed in as ${state.user.full_name || userId()} · ${state.user.role === "lecturer" ? "Lecturer" : "Student"}`;
+  updateQueuedBadge();
+
+  state.ws.on("FORUM_THREAD_NEW", (post) => {
+    if (post.course_id !== state.courseId || state.posts.some((p) => p.id === post.id)) return;
+    const feed = document.getElementById("forum-feed");
+    if (!state.posts.length) feed.innerHTML = "";
+    state.posts.unshift(post);
+    feed.insertAdjacentHTML("afterbegin", renderPost(post));
+  });
+  state.ws.on("FORUM_COMMENT_NEW", (data) => {
+    if (data.course_id !== state.courseId || !data.comment) return;
+    appendCommentToDom(data.post_id, data.comment);
+  });
+  state.ws.onStatusChange = (s) => {
+    if (s === "connected") flushOfflineForumQueue();
+  };
+  window.addEventListener("online", flushOfflineForumQueue);
 
   document.getElementById("forum-course-tabs").addEventListener("click", (e) => {
     const tab = e.target.closest(".forum-course-tab");

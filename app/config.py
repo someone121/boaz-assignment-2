@@ -23,6 +23,9 @@ class Settings:
     DEFAULT_LECTURER_PASSWORD: str = os.getenv("DEFAULT_LECTURER_PASSWORD", "admin123")
     QUIZ_TOKEN_TTL_SECONDS: int = 300
     DEFAULT_PRESENCE_THRESHOLD: float = 0.70
+    DEMO_MODE: bool = os.getenv("DEMO_MODE", "").lower() in {"1", "true", "yes"}
+    VIDEO_SAMPLE_INTERVAL_SECONDS: int = int(os.getenv("VIDEO_SAMPLE_INTERVAL_SECONDS", "5"))
+    PUBLIC_BASE_URL: str = os.getenv("PUBLIC_BASE_URL", "").strip().rstrip("/")
 
     @staticmethod
     def ensure_directories() -> None:

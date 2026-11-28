@@ -36,14 +36,14 @@ The first build takes several minutes: it downloads CPU-only PyTorch, Ultralytic
 | `FROM python:3.11-slim` | Debian slim, **not** Alpine (PyTorch/OpenCV wheels need glibc). |
 | `ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PYTHONPATH=/app` | No `.pyc` files, logs appear immediately, `app` is importable. |
 | `pip install --upgrade pip setuptools wheel` | Recent pip to install binary wheels. |
-| `apt-get install libgl1 libglib2.0-0 ffmpeg` | Libraries OpenCV and media handling need. |
+| `apt-get install libgl1 libglib2.0-0 ffmpeg git` | Libraries OpenCV, media handling, and `git clone` for homework review need. |
 | `COPY requirements.txt` → install **CPU-only** `torch torchvision` → `pip install -r requirements.txt` | Installing CPU torch first stops Ultralytics from pulling the much larger CUDA build. Copying only `requirements.txt` first means code changes don't redo this step. |
 | `python -c "from ultralytics import YOLO; YOLO('yolov8n.pt')"` | Downloads the YOLOv8n weights into `/app` **at build time**, so the container starts offline. |
 | `COPY . .` | App source, `static/`, `tests/`. Files listed in [.dockerignore](../.dockerignore) are skipped: venvs, caches, local DBs, uploads, reports, `.git`, `*.pt`, `.env`. |
 | `mkdir -p /app/data /app/uploads /app/reports` | Mount points for the volumes. |
 | `EXPOSE 8000` + `CMD uvicorn app.main:app --host 0.0.0.0 --port 8000` | **One worker** (see §5). |
 
-In the container, uploaded classroom **images** are processed by real YOLOv8n + ByteTrack. Video files cannot be decoded as one frame, so they fall back to the mock tracker. The `detector_mode` field in the response shows which ran.
+In the container, uploaded classroom **images** and **videos** are processed by real YOLOv8n + ByteTrack (videos are sampled via OpenCV every `VIDEO_SAMPLE_INTERVAL_SECONDS` seconds, reporting `detector_mode: "yolo_video"`). `ffmpeg` and `git` are installed for audio extraction and GitHub homework cloning. **Audio/video transcription in Docker requires `OPENAI_API_KEY`** (Whisper API), as `faster-whisper` is not bundled in `requirements.txt` to keep the image lean; `.vtt`/`.srt`/`.txt` transcripts work offline.
 
 ---
 
@@ -56,8 +56,11 @@ One service, `smartclass-app` (container name `smartclass_ai`), on port **8000:8
 | Variable | Value in compose | Change it by |
 | :--- | :--- | :--- |
 | `DATABASE_URL` | `sqlite:///./data/smartclass.db` (inside the `data` volume) | editing compose |
-| `OPENAI_API_KEY` | `${OPENAI_API_KEY:-}` | setting it in `.env` |
+| `OPENAI_API_KEY` | `${OPENAI_API_KEY:-}` | setting it in `.env` (required in Docker for audio/video Whisper transcription & LLM reviews) |
 | `SECRET_KEY` | `${SECRET_KEY:-supersecret_kiss_key}` | setting it in `.env` |
+| `PUBLIC_BASE_URL` | `${PUBLIC_BASE_URL:-}` | setting it in `.env` (e.g. `http://192.168.1.42:8000`) so QRs use LAN IP while lecturer uses `localhost` for webcam |
+| `DEMO_MODE` | *(unset / false)* | set `DEMO_MODE=true` to return preview numbers on empty session reports |
+| `VIDEO_SAMPLE_INTERVAL_SECONDS` | `5` | OpenCV sampling interval for uploaded attendance videos |
 | `DEFAULT_LECTURER_ID` / `_NAME` / `_PASSWORD` | `111111111` / `Default Lecturer` / `admin123` | **editing compose** (hard-coded there, so the values in `.env` are ignored) |
 
 Compose reads `.env` only to fill in `${...}` placeholders. It is not passed to the container as a whole. `APP_HOST` / `APP_PORT` in `.env.example` are not used.
@@ -107,7 +110,7 @@ For a **production / demo server**:
   - forward the WebSocket upgrade for `/ws/`;
   - the frontend switches to `wss://` automatically on HTTPS pages.
 - **No camera in the cloud.** A server has no `/dev/video0`. Use the dashboard's **Start Webcam Stream** (the browser sends frames) or upload images.
-- **QR codes** use the address the lecturer opened the dashboard with (`window.location.origin`). To let phones scan them, open the dashboard via the machine's LAN IP or public domain, not `localhost`.
+- **QR codes & Webcam together (`PUBLIC_BASE_URL`):** `getUserMedia` (webcam) only works on `https://` or `localhost`, while student phones need the machine's LAN IP. Set `PUBLIC_BASE_URL=http://<LAN_IP>:8000` in `.env` so the lecturer can open `http://localhost:8000/lecturer_dashboard` (webcam works) while all generated QR codes point phones to `http://<LAN_IP>:8000/...`.
 - **Image size** is a few GB, mostly PyTorch. The service runs fine on a small CPU-only VM.
 
 ---

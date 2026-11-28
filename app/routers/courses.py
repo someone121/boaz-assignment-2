@@ -1,9 +1,13 @@
 """Course catalog and student enrollment workflow endpoints."""
 
+import csv
+import hashlib
+import io
 from typing import Optional
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+import openpyxl
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -231,3 +235,72 @@ def approve_enrollment(
         status=enrollment.status,
         enrolled_at=enrollment.enrolled_at,
     )
+
+
+@router.post("/courses/{course_id}/import-students")
+async def import_course_students(
+    course_id: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Import a class student roster (names only, no ID numbers) from CSV or XLSX."""
+    course = db.get(Course, course_id)
+    if course is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found.")
+
+    raw = await file.read()
+    filename = (file.filename or "roster.csv").lower()
+    names: list[str] = []
+
+    if filename.endswith(".xlsx"):
+        wb = openpyxl.load_workbook(io.BytesIO(raw), data_only=True)
+        for row in wb.active.iter_rows(values_only=True):
+            if row and row[0]:
+                val = str(row[0]).strip()
+                if val.lower() not in {"name", "full_name", "student_name", "student"}:
+                    names.append(val)
+    else:
+        text = raw.decode("utf-8", errors="ignore")
+        for row in csv.reader(io.StringIO(text)):
+            if row and row[0].strip():
+                val = row[0].strip()
+                if val.lower() not in {"name", "full_name", "student_name", "student"}:
+                    names.append(val)
+
+    if not names:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No student names found in uploaded roster.",
+        )
+
+    imported: list[dict] = []
+    for name in names:
+        digest = hashlib.sha1(f"{course_id}:{name}".encode("utf-8")).hexdigest()[:8]
+        roster_id = f"stu_{digest}"
+
+        if db.get(User, roster_id) is None:
+            db.add(User(user_id=roster_id, full_name=name, role="student", is_approved=True))
+        if db.get(Student, roster_id) is None:
+            db.add(Student(student_id=roster_id, full_name=name))
+        db.flush()
+
+        existing = (
+            db.query(Enrollment)
+            .filter(Enrollment.student_id == roster_id, Enrollment.course_id == course_id)
+            .first()
+        )
+        if existing is None:
+            db.add(
+                Enrollment(
+                    student_id=roster_id,
+                    course_id=course_id,
+                    status="approved",
+                    enrolled_at=utcnow(),
+                )
+            )
+        else:
+            existing.status = "approved"
+        imported.append({"student_id": roster_id, "name": name})
+
+    db.commit()
+    return {"course_id": course_id, "imported_count": len(imported), "students": imported}
