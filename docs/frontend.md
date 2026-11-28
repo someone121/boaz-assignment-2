@@ -53,6 +53,7 @@ Each page loads exactly one controller with `<script type="module" src="/static/
 | `/lecturer_dashboard` (alias `/dashboard`) | `lecturer_dashboard.html` |
 | `/student_dashboard` (alias `/live`) | `student_dashboard.html` |
 | `/s/{token}` | `student_dashboard.html`, with the quiz for that QR token opened |
+| `/checkin/{token}` | `student_dashboard.html`, with the self check-in card opened |
 | `/forum` | `forum.html` |
 
 ---
@@ -143,29 +144,29 @@ Changing the session reconnects the WebSocket to that session's channel.
   - Launches the next question, or a chosen one.
   - Draws a QR code for `<origin>/s/{token}` with a 05:00 countdown.
   - The answer chart updates live from `QUIZ_UPDATE`.
-- **Instant poll.** Prompt + 2–4 options. The bar chart updates live from `POLL_UPDATE`.
+- **Instant poll.** Prompt + 2–4 options + **Close Poll** button. The bar chart updates live from `POLL_UPDATE`.
 
 **Tab 2: AI Video Summary & HW Review**
 - **Lecture summary.**
-  - Upload `.mp4 .m4a .mp3 .wav .txt .md`, with a progress bar.
-  - The rendered summary appears when the request returns or when `SUMMARY_READY` arrives.
+  - Upload `.mp4 .m4a .mp3 .wav .vtt .srt .txt .md`, with a progress bar.
+  - The rendered summary appears when the request returns or when `SUMMARY_READY` arrives (or warns if transcription is unavailable).
   - A toast links to the forum.
-- **Homework review.** One repository URL per line → table of scores and feedback.
+- **Homework review.** One repository URL per line → cohort table with rubric scores, percentiles, and TF-IDF similarity flags.
 
 **Tab 3: Attendance Control**
 - **Start Webcam Stream.**
   - Uses `getUserMedia`, draws a frame to a `<canvas>` every 5 s and uploads it as JPEG.
-  - Works with the server in the cloud, because frames come from the lecturer's browser.
+- **Student Self Check-In QR.** Generates a 5-minute `/checkin/{token}` QR code; updates live on `ATTENDANCE_UPDATE`.
+- **Count People in Class Photo.** Single photo upload returning person count and bounding-box annotated image.
 - **File upload.** Image or video (`.jpg .jpeg .png .webp .mp4 .mov .avi`).
-- **Live table** of tracks, minutes and status.
-- **End Session & Download CSV**: stops the session, downloads the CSV and opens the report modal.
-- A list of past sessions, each with a report button.
+- **Live table** of sources (`camera`, `self_checkin`, `both`), minutes, and status.
+- **End Session & Download CSV** + **Download .xlsx**.
+- A list of past sessions, each with a **View Report** button.
 
 **Tab 4: Pending Enrollments**
 - Approve buttons for pending requests. The badge on the tab shows the count.
-- **Manage Courses** creates a course owned by the signed-in lecturer.
-
-The pending list and the course list show **all** courses in the system, not only this lecturer's.
+- **Manage Courses** creates a course and **Import Student Roster** imports a names-only `.csv`/`.xlsx`.
+- **Student Messages / Suggestions** lists `private_message` posts live via `STUDENT_MESSAGE_NEW` with **Mark as Read**.
 
 ### Student dashboard (`student.js`)
 
@@ -174,23 +175,16 @@ The pending list and the course list show **all** courses in the system, not onl
   - Loads the question, shows big radio buttons and a countdown.
   - Then shows a green "recorded" or a red "window closed" banner (`410` on load, `403` on submit).
 - **Available courses.** Request to join a course; the status badge shows `pending` or `approved`.
+- **Self check-in card.** Shown on `/checkin/{token}`; one tap on **"I'm Here"** marks attendance.
 - **Live class poll.**
-  - Shows the latest poll of the current session: the session from the QR token, otherwise the newest session.
-  - One tap to vote. Updates live from `POLL_UPDATE`.
-- **Private message to lecturer.** Sends a `private_message` to `/api/forum/posts`.
-  - **Known gap:** no page shows these messages to the lecturer yet. They can be read through `GET /api/forum/posts?post_type=private_message`.
+  - Shows the latest poll of the current session; displays `"Poll Closed"` and disables buttons when `is_open === false`.
+- **Homework AI Review.** Submit a GitHub repo URL and view your personal rubric score and cohort comparison.
+- **Private message to lecturer.** Sends a `private_message` to `/api/forum/posts`; queues in `localStorage` (`smartclass_offline_queue`) when offline and flushes on reconnect.
 
 ### Forum (`forum.js`)
 
-- **Course tabs:**
-  - lecturers see the courses where `lecturer_id` is their ID;
-  - students see the courses where their `enrollment_status` is `approved`.
-- The last opened course is remembered in `localStorage`.
-- Threads are listed newest first, replies under each thread oldest first.
-- **Start a Discussion** (title + message) and an inline reply box under every thread.
-  - The new item is added to the page from the API response; the list is not reloaded.
-- **No WebSocket:** other people's new posts appear after switching course or reloading.
-- AI summaries and private messages live in the legacy feed and are **not** shown here.
+- **Course tabs:** lecturers see their courses; students see courses with `approved` enrollment.
+- **Real-time & offline:** Connects `SmartClassSocket` to `course:{courseId}` for live `FORUM_THREAD_NEW` and `FORUM_COMMENT_NEW` updates; queues posts/replies in `localStorage` when offline with a `Queued (offline)` badge and flushes on reconnect.
 - "Back to Dashboard" links to the dashboard for your role.
 
 ---

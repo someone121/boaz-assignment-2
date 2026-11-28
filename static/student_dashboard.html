@@ -79,6 +79,19 @@
       </span>
     </section>
 
+    <!-- Attendance Self Check-In Card (Shown when accessed via /checkin/{token}) -->
+    <section id="checkin-card" class="hidden bg-white rounded-2xl border border-[#c08552]/40 shadow-lg shadow-[#8c5a3c]/10 p-6 space-y-4 text-center">
+      <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-[#c08552]/15 text-[#8c5a3c]">
+        Attendance Check-In
+      </div>
+      <h3 id="checkin-course-title" class="text-lg font-bold text-[#4b2e2b]">Class Attendance</h3>
+      <p id="checkin-timer-text" class="text-xs font-mono text-[#8c5a3c]">5:00 remaining</p>
+      <button id="checkin-submit-btn" type="button" class="w-full bg-[#c08552] hover:bg-[#8c5a3c] text-white font-semibold py-3.5 rounded-2xl transition shadow-md shadow-[#c08552]/20 text-sm">
+        I'm Here (Mark Attendance)
+      </button>
+      <p id="checkin-done-banner" class="hidden text-sm font-bold text-[#8c5a3c]"></p>
+    </section>
+
     <!-- Active 5-Min Timed Quiz Card (Shown when accessed via /s/{token}) -->
     <section id="quiz-card" class="hidden bg-white rounded-2xl border border-[#c08552]/35 shadow-lg shadow-[#8c5a3c]/10 p-6 space-y-5">
       <div class="flex items-center justify-between">
@@ -122,11 +135,29 @@
       <div id="student-poll-container"></div>
     </section>
 
-    <!-- Private Message to Lecturer -->
+    <!-- Submit Homework for AI Review -->
     <section class="bg-white rounded-2xl border border-[#8c5a3c]/15 shadow-lg shadow-[#8c5a3c]/10 p-6 space-y-4">
       <div>
-        <h2 class="text-base font-bold text-[#4b2e2b]">Private Message to Lecturer</h2>
-        <p class="text-xs text-[#8c5a3c]">Send a quiet question directly to your instructor</p>
+        <h2 class="text-base font-bold text-[#4b2e2b]">Homework AI Review</h2>
+        <p class="text-xs text-[#8c5a3c]">Submit your GitHub repository URL to get rubric feedback</p>
+      </div>
+      <form id="student-hw-form" class="flex gap-2">
+        <input id="student-hw-url" type="url" required placeholder="https://github.com/user/repo" class="flex-1 rounded-xl border border-[#8c5a3c]/25 bg-[#fff8f0]/40 px-3.5 py-2.5 text-sm font-mono text-[#4b2e2b] focus:bg-white focus:ring-2 focus:ring-[#c08552] outline-none" />
+        <button type="submit" class="bg-[#c08552] hover:bg-[#8c5a3c] text-white text-xs sm:text-sm font-semibold px-4 py-2.5 rounded-xl transition shrink-0">
+          Review
+        </button>
+      </form>
+      <div id="student-hw-reviews" class="space-y-2.5"></div>
+    </section>
+
+    <!-- Private Message to Lecturer -->
+    <section class="bg-white rounded-2xl border border-[#8c5a3c]/15 shadow-lg shadow-[#8c5a3c]/10 p-6 space-y-4">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="text-base font-bold text-[#4b2e2b]">Private Message to Lecturer</h2>
+          <p class="text-xs text-[#8c5a3c]">Send a quiet question or suggestion directly to your instructor</p>
+        </div>
+        <span id="student-offline-badge" class="hidden px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-[#fff8f0] border border-[#c08552] text-[#8c5a3c]">Queued (offline)</span>
       </div>
       <form id="private-msg-form" class="space-y-3">
         <textarea id="private-msg-text" rows="2" placeholder="Ask a private question to your lecturer..." class="w-full rounded-2xl border border-[#8c5a3c]/25 bg-[#fff8f0]/40 px-4 py-3 text-sm text-[#4b2e2b] placeholder:text-[#8c5a3c]/50 focus:bg-white focus:ring-2 focus:ring-[#c08552] outline-none transition"></textarea>

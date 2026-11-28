@@ -24,7 +24,10 @@ apiClient.interceptors.response.use(
 );
 
 export const api = {
-  // Auth & Sessions
+  // Core & Auth & Sessions
+  getConfig() {
+    return apiClient.get("/api/config").then((r) => r.data);
+  },
   login(payload) {
     return apiClient.post("/api/auth/login", payload).then((r) => r.data);
   },
@@ -59,6 +62,13 @@ export const api = {
       .post("/api/enroll/approve", { enrollment_id: enrollmentId })
       .then((r) => r.data);
   },
+  importCourseStudents(courseId, file) {
+    const formData = new FormData();
+    formData.append("file", file);
+    return apiClient
+      .post(`/api/courses/${encodeURIComponent(courseId)}/import-students`, formData)
+      .then((r) => r.data);
+  },
 
   // Attendance
   uploadAttendanceFrame(sessionId, fileBlob, filename = "frame.jpg", intervalSeconds = 5) {
@@ -67,6 +77,26 @@ export const api = {
     formData.append("interval_seconds", String(intervalSeconds));
     formData.append("file", fileBlob, filename);
     return apiClient.post("/api/attendance/frame", formData).then((r) => r.data);
+  },
+  countAttendancePhoto(file) {
+    const formData = new FormData();
+    formData.append("file", file);
+    return apiClient.post("/api/attendance/count-photo", formData).then((r) => r.data);
+  },
+  triggerAttendanceCheckIn(sessionId, lecturerId = null, ttlSeconds = 300) {
+    return apiClient
+      .post("/api/attendance/checkin/trigger", {
+        session_id: sessionId,
+        lecturer_id: lecturerId,
+        ttl_seconds: ttlSeconds,
+      })
+      .then((r) => r.data);
+  },
+  getCheckInDetails(token) {
+    return apiClient.get(`/api/attendance/checkin/${encodeURIComponent(token)}`).then((r) => r.data);
+  },
+  submitAttendanceCheckIn(payload) {
+    return apiClient.post("/api/attendance/checkin/submit", payload).then((r) => r.data);
   },
   getAttendanceStatus(sessionId) {
     return apiClient.get(`/api/attendance/status/${encodeURIComponent(sessionId)}`).then((r) => r.data);
@@ -85,6 +115,24 @@ export const api = {
     const link = document.createElement("a");
     link.href = url;
     link.setAttribute("download", `attendance_${sessionId}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+  },
+  async downloadAttendanceXlsx(sessionId) {
+    const response = await apiClient.get("/api/attendance/export-xlsx", {
+      params: { session_id: sessionId },
+      responseType: "blob",
+    });
+    const url = window.URL.createObjectURL(
+      new Blob([response.data], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      })
+    );
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", `attendance_${sessionId}.xlsx`);
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -127,6 +175,9 @@ export const api = {
   votePoll(payload) {
     return apiClient.post("/api/poll/vote", payload).then((r) => r.data);
   },
+  closePoll(pollId) {
+    return apiClient.post(`/api/poll/${encodeURIComponent(pollId)}/close`).then((r) => r.data);
+  },
 
   // Forum
   listForumPosts(params = {}) {
@@ -134,6 +185,9 @@ export const api = {
   },
   createForumPost(payload) {
     return apiClient.post("/api/forum/posts", payload).then((r) => r.data);
+  },
+  markForumPostRead(postId) {
+    return apiClient.post(`/api/forum/posts/${encodeURIComponent(postId)}/read`).then((r) => r.data);
   },
 
   // Course Forum (REST: threads + replies scoped to a course)
@@ -154,11 +208,12 @@ export const api = {
   },
 
   // AI Workflows
-  summarizeLecture(file, sessionId, courseName, onUploadProgress) {
+  summarizeLecture(file, sessionId, courseName, onUploadProgress, courseId = null) {
     const formData = new FormData();
     formData.append("file", file);
     if (sessionId) formData.append("session_id", sessionId);
     if (courseName) formData.append("course_name", courseName);
+    if (courseId) formData.append("course_id", courseId);
     return apiClient
       .post("/api/ai/summarize-lecture", formData, { onUploadProgress })
       .then((r) => r.data);
@@ -166,12 +221,17 @@ export const api = {
   listSummaries() {
     return apiClient.get("/api/ai/summaries").then((r) => r.data);
   },
-  reviewHomework(repoUrls, sessionId = null) {
+  reviewHomework(repoUrls, sessionId = null, studentId = null) {
     return apiClient
-      .post("/api/ai/review-homework", { session_id: sessionId, repo_urls: repoUrls })
+      .post("/api/ai/review-homework", {
+        session_id: sessionId,
+        student_id: studentId,
+        repo_urls: repoUrls,
+      })
       .then((r) => r.data);
   },
-  listHomeworkReviews() {
-    return apiClient.get("/api/ai/reviews").then((r) => r.data);
+  listHomeworkReviews(studentId = null) {
+    const params = studentId ? { student_id: studentId } : {};
+    return apiClient.get("/api/ai/reviews", { params }).then((r) => r.data);
   },
 };

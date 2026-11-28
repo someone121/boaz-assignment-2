@@ -24,6 +24,7 @@ async def create_live_poll(payload: PollCreateRequest, db: Session = Depends(get
             "poll_id": poll.id,
             "prompt": poll.prompt,
             "results": result["results"],
+            "is_open": result["is_open"],
         },
     )
     return result
@@ -57,6 +58,24 @@ async def vote_in_poll(payload: PollVoteRequest, db: Session = Depends(get_db)) 
             "poll_id": result["poll_id"],
             "prompt": result["prompt"],
             "results": result["results"],
+            "is_open": result["is_open"],
+        },
+    )
+    return result
+
+
+@router.post("/{poll_id}/close")
+async def close_live_poll(poll_id: str, db: Session = Depends(get_db)) -> dict:
+    """Close an active poll and broadcast the closed state."""
+    result = poll_service.close_poll(db, poll_id)
+    await ws_manager.broadcast_event(
+        result["session_id"],
+        "POLL_UPDATE",
+        {
+            "poll_id": result["poll_id"],
+            "prompt": result["prompt"],
+            "results": result["results"],
+            "is_open": result["is_open"],
         },
     )
     return result

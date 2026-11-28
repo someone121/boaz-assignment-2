@@ -109,10 +109,10 @@ def list_course_posts(
     response_model=CoursePostResponse,
     status_code=status.HTTP_201_CREATED,
 )
-def create_course_post(
+async def create_course_post(
     course_id: str, payload: CoursePostCreate, db: Session = Depends(get_db)
 ) -> ForumPost:
-    """Start a new discussion thread in a course."""
+    """Start a new discussion thread in a course and broadcast FORUM_THREAD_NEW."""
     course, user = _require_course_access(db, course_id, payload.author_id)
 
     title = payload.title.strip()
@@ -137,6 +137,22 @@ def create_course_post(
     db.add(post)
     db.commit()
     db.refresh(post)
+
+    await ws_manager.broadcast_event(
+        f"course:{course.id}",
+        "FORUM_THREAD_NEW",
+        {
+            "id": post.id,
+            "course_id": post.course_id,
+            "author_id": post.author_id,
+            "author_name": post.author_name,
+            "author_role": post.author_role,
+            "title": post.title,
+            "content": post.content,
+            "created_at": post.created_at.isoformat(),
+            "comments": [],
+        },
+    )
     return post
 
 
@@ -145,10 +161,10 @@ def create_course_post(
     response_model=ForumCommentResponse,
     status_code=status.HTTP_201_CREATED,
 )
-def create_post_comment(
+async def create_post_comment(
     post_id: int, payload: ForumCommentCreate, db: Session = Depends(get_db)
 ) -> ForumComment:
-    """Reply to a course discussion thread."""
+    """Reply to a course discussion thread and broadcast FORUM_COMMENT_NEW."""
     post = db.get(ForumPost, post_id)
     if post is None or post.course_id is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found.")
@@ -173,6 +189,24 @@ def create_post_comment(
     db.add(comment)
     db.commit()
     db.refresh(comment)
+
+    await ws_manager.broadcast_event(
+        f"course:{post.course_id}",
+        "FORUM_COMMENT_NEW",
+        {
+            "post_id": post.id,
+            "course_id": post.course_id,
+            "comment": {
+                "id": comment.id,
+                "post_id": comment.post_id,
+                "author_id": comment.author_id,
+                "author_name": comment.author_name,
+                "author_role": comment.author_role,
+                "content": comment.content,
+                "created_at": comment.created_at.isoformat(),
+            },
+        },
+    )
     return comment
 
 
@@ -215,7 +249,20 @@ async def create_forum_post(payload: ForumPostCreate, db: Session = Depends(get_
     db.refresh(post)
 
     target_channel = payload.session_id or "global"
-    if payload.post_type != "private_message":
+    if payload.post_type == "private_message":
+        await ws_manager.broadcast_event(
+            target_channel,
+            "STUDENT_MESSAGE_NEW",
+            {
+                "id": post.id,
+                "author_id": post.author_id,
+                "author_name": post.author_name,
+                "content": post.content,
+                "is_read": post.is_read,
+                "created_at": post.created_at.isoformat(),
+            },
+        )
+    else:
         await ws_manager.broadcast_event(
             target_channel,
             "NEW_FORUM_POST",
@@ -228,4 +275,16 @@ async def create_forum_post(payload: ForumPostCreate, db: Session = Depends(get_
                 "timestamp": post.created_at.isoformat(),
             },
         )
+    return post
+
+
+@router.post("/posts/{post_id}/read", response_model=ForumPostResponse)
+def mark_post_as_read(post_id: int, db: Session = Depends(get_db)) -> ForumPost:
+    """Mark a student private message/suggestion as read."""
+    post = db.get(ForumPost, post_id)
+    if post is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found.")
+    post.is_read = True
+    db.commit()
+    db.refresh(post)
     return post

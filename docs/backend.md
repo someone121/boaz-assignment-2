@@ -47,7 +47,9 @@ All settings live in [app/config.py](../app/config.py) and are read **once, at i
 | :--- | :--- | :--- |
 | `DATABASE_URL` | `sqlite:///<project>/data/smartclass.db` | Any SQLAlchemy URL. The SQLite pragmas are only applied to `sqlite` URLs. |
 | `SECRET_KEY` | `supersecret_kiss_key` | Salt for lecturer password hashes. Changing it makes every existing lecturer password stop working. |
-| `OPENAI_API_KEY` | *(empty)* | When set, summaries use `gpt-4o-mini`. When empty or the call fails, a fixed offline summary is returned. |
+| `OPENAI_API_KEY` | *(empty)* | When set, summaries and homework reviews use OpenAI (`gpt-4o-mini`, `whisper-1`). |
+| `DEMO_MODE` | `false` | When `true`, empty session reports return preview demo numbers (`is_mock_data: true`). |
+| `VIDEO_SAMPLE_INTERVAL_SECONDS` | `5` | OpenCV frame sampling interval for uploaded attendance videos. |
 | `DEFAULT_LECTURER_ID` | `111111111` | Seeded at startup. Set to an empty string to disable. |
 | `DEFAULT_LECTURER_NAME` | `Default Lecturer` | |
 | `DEFAULT_LECTURER_PASSWORD` | `admin123` | Only used when the account is first created. |
@@ -88,6 +90,8 @@ SQLite connections run with `journal_mode=WAL`, `foreign_keys=ON` and `busy_time
 | `enrollments` | `Enrollment` | `pending` or `approved` link between student and course. |
 | `sessions` | `LectureSession` | One lecture. Holds start/end time and final attendance counts. |
 | `attendance_records` | `AttendanceRecord` | Dwell seconds per tracked person (`track_id`) per session, optionally linked to a student. |
+| `active_checkin_tokens` | `ActiveCheckInToken` | Short-lived QR tokens for student self check-in. |
+| `attendance_checkins` | `AttendanceCheckIn` | Self check-in timestamps linked to students and sessions. |
 | `quiz_questions` | `QuizQuestion` | Imported from Excel. `is_used` flips when triggered. |
 | `active_question_tokens` | `ActiveQuestionToken` | The QR token; valid until `expires_at`. |
 | `quiz_submissions` | `QuizSubmission` | A student's answer with `is_correct`. |
@@ -129,10 +133,11 @@ Bodies are JSON unless marked **form** (`multipart/form-data`). Errors return `{
 | Method | Path | Body / params | Returns |
 | :--- | :--- | :--- | :--- |
 | GET | `/api/health` | | `{status, app, version, database}` |
+| GET | `/api/config` | | `{public_base_url, demo_mode}` (used by `lecturer.js` for QR links) |
 | POST | `/api/auth/login` | `{id_number \| user_id, full_name?, role?, password?, email?}` | User profile. `400` no ID / lecturer without password, `401` wrong password, `403` role mismatch |
 | POST | `/api/session/start` | `{course_name, course_id?, lecturer_id?}` | New active session |
 | GET | `/api/sessions` | | All sessions, newest first |
-| GET | `/api/sessions/{session_id}/report` | | Attendance summary. Before any frame is uploaded it returns demo numbers with `is_mock_data: true`. `404` unknown session |
+| GET | `/api/sessions/{session_id}/report` | | Attendance summary. Returns zeros + `no_data: true` when empty (or demo numbers only if `DEMO_MODE=true`). `404` unknown session |
 
 ### Courses and enrollment ([routers/courses.py](../app/routers/courses.py))
 
@@ -144,25 +149,27 @@ Bodies are JSON unless marked **form** (`multipart/form-data`). Errors return `{
 | POST | `/api/enroll` | `{student_id, course_id}` | `pending` enrollment. Asking again returns the existing one. `404` course |
 | GET | `/api/enroll/pending` | | All pending enrollments (every course) |
 | POST | `/api/enroll/approve` | `{enrollment_id}` or `{student_id, course_id}` | Approved enrollment. `400` missing identifiers, `404` not found |
+| POST | `/api/courses/{course_id}/import-students` | **form** `file` (.csv/.xlsx) | Imports names-only student roster (`stu_<hash>`) as approved enrollments |
 
 ### Course forum ([routers/forum.py](../app/routers/forum.py))
 
-Plain REST, no WebSocket events. Access rules: section 5.
+Broadcasts `FORUM_THREAD_NEW` and `FORUM_COMMENT_NEW` on `course:{course_id}`. Access rules: section 5.
 
 | Method | Path | Body / params | Returns |
 | :--- | :--- | :--- | :--- |
 | GET | `/api/courses/{course_id}/posts` | `?user_id=` (required) | Threads newest first, each with `comments` oldest first |
-| POST | `/api/courses/{course_id}/posts` | `{author_id, title, content}` | `201` thread. `400` blank title/content |
-| POST | `/api/posts/{post_id}/comments` | `{author_id, content}` | `201` reply. `404` if the post doesn't exist or isn't a course thread |
+| POST | `/api/courses/{course_id}/posts` | `{author_id, title, content}` | `201` thread + `FORUM_THREAD_NEW`. `400` blank title/content |
+| POST | `/api/posts/{post_id}/comments` | `{author_id, content}` | `201` reply + `FORUM_COMMENT_NEW`. `404` if post doesn't exist |
 
 Author name and role are copied from the `users` table, not from the request.
 
-### Legacy forum feed
+### Legacy forum feed & private messages
 
 | Method | Path | Body / params | Returns |
 | :--- | :--- | :--- | :--- |
-| GET | `/api/forum/posts` | `?session_id=&post_type=` | Posts newest first (includes course threads unless filtered) |
-| POST | `/api/forum/posts` | `{author_name, content, post_type?, author_role?, session_id?, author_id?, recipient_id?, course_name?}` | New post. Broadcasts `NEW_FORUM_POST` unless `post_type` is `private_message` |
+| GET | `/api/forum/posts` | `?session_id=&post_type=` | Posts newest first |
+| POST | `/api/forum/posts` | `{author_name, content, post_type?, ...}` | New post. Broadcasts `NEW_FORUM_POST` or `STUDENT_MESSAGE_NEW` (for `private_message`) |
+| POST | `/api/forum/posts/{post_id}/read` | | Marks a student private message/suggestion as read (`is_read: true`) |
 
 Used for AI summaries (`ai_summary`) and student → lecturer private messages (`private_message`).
 
@@ -170,10 +177,15 @@ Used for AI summaries (`ai_summary`) and student → lecturer private messages (
 
 | Method | Path | Body / params | Returns |
 | :--- | :--- | :--- | :--- |
-| POST | `/api/attendance/frame` | **form** `session_id`, `file`, `interval_seconds` (default 5) | `{detected_count, active_track_ids, total_tracked_unique, detector_mode}` |
-| GET | `/api/attendance/status/{session_id}` | | `{total_tracked, records[]}` with `presence_status` per track |
-| POST | `/api/attendance/stop` | `?session_id=` | Closes the session, writes the CSV, broadcasts `ATTENDANCE_DONE` |
+| POST | `/api/attendance/frame` | **form** `session_id`, `file`, `interval_seconds` (default 5) | `{detected_count, active_track_ids, total_tracked_unique, detector_mode}` (supports images + sampled videos) |
+| POST | `/api/attendance/count-photo` | **form** `file` | `{count, boxes, annotated_image_base64, detector_mode}` |
+| POST | `/api/attendance/checkin/trigger` | `{session_id, lecturer_id?, ttl_seconds?}` | `{token, qr_path: "/checkin/{token}", expires_at}` |
+| GET | `/api/attendance/checkin/{token}` | | `{session_id, course_name, seconds_remaining}`. `410` expired |
+| POST | `/api/attendance/checkin/submit` | `{token, student_id, full_name}` | `{status: "checked_in", ...}`. Broadcasts `ATTENDANCE_UPDATE`. `403` expired |
+| GET | `/api/attendance/status/{session_id}` | | `{total_tracked, records[]}` (camera tracks + self check-ins) |
+| POST | `/api/attendance/stop` | `?session_id=` | Closes session, writes CSV/XLSX links, broadcasts `ATTENDANCE_DONE` |
 | GET | `/api/attendance/export` | `?session_id=` | CSV file download (`attendance_<id>.csv`) |
+| GET | `/api/attendance/export-xlsx` | `?session_id=` | Excel file download (`attendance_<id>.xlsx`) |
 
 ### Quiz ([routers/quiz.py](../app/routers/quiz.py))
 
@@ -196,6 +208,7 @@ A quiz submit also links the student to one unassigned attendance track in that 
 | POST | `/api/poll/create` | `{session_id, prompt, option_1, option_2, option_3?, option_4?}` | `{poll_id, options, results, total_votes, is_open}`. Broadcasts `POLL_UPDATE` |
 | GET | `/api/poll/{session_id}` | | Session polls with tallies, newest first |
 | POST | `/api/poll/vote` | `{poll_id, selected_option, student_id?}` | Updated tallies. `400` invalid option, `403` closed, `404` unknown. Broadcasts `POLL_UPDATE` |
+| POST | `/api/poll/{poll_id}/close` | | Closes poll (`is_open: false`) and broadcasts `POLL_UPDATE` |
 
 `selected_option` is the option **text**, not a letter.
 
@@ -203,16 +216,16 @@ A quiz submit also links the student to one unassigned attendance track in that 
 
 | Method | Path | Body / params | Returns |
 | :--- | :--- | :--- | :--- |
-| POST | `/api/ai/summarize-lecture` | **form** `file`, `session_id?`, `course_name?` | `{summary_id, forum_post_id, markdown_summary}`. Also creates an `ai_summary` feed post and broadcasts `SUMMARY_READY` + `NEW_FORUM_POST` |
+| POST | `/api/ai/summarize-lecture` | **form** `file`, `session_id?`, `course_name?`, `course_id?` | `{summary_id, forum_post_id, course_id, markdown_summary, transcription_available, source_mode}` |
 | GET | `/api/ai/summaries` | | Stored summaries |
-| POST | `/api/ai/review-homework` | `{repo_urls[], session_id?}` | `{count, reviews[]}`; blank URLs are skipped |
-| GET | `/api/ai/reviews` | | Stored reviews |
+| POST | `/api/ai/review-homework` | `{repo_urls[], session_id?, student_id?}` | `{count, reviews[]}` (with `rubric`, `similarity`, `analysis_mode`) |
+| GET | `/api/ai/reviews` | `?student_id=` (optional) | Stored reviews |
 
 What is real and what is simulated:
 
-- `.txt` / `.md` uploads are used as the transcript.
-- Audio and video are **not** transcribed; a placeholder transcript is used.
-- Homework reviews do **not** fetch the repository; score and feedback are generated from the URL.
+- `.txt`, `.md`, `.vtt`, and `.srt` uploads are parsed directly (subtitles preserve timestamps).
+- Audio/video files extract audio with `ffmpeg` and transcribe via OpenAI Whisper or `faster-whisper`; if neither is installed/configured, `transcription_available: false` (`Transcription Unavailable`) is returned explicitly.
+- Homework review shallow-clones GitHub URLs (`git clone --depth 1`), scores 5 rubric criteria (LLM or `[Non-LLM Static Analysis]`), and computes TF-IDF cosine similarity + cohort percentiles.
 
 ### Page routes (not in OpenAPI)
 
@@ -235,10 +248,14 @@ Messages are `{"event": "<TYPE>", "data": {...}}`. Each event is sent to the cha
 | Event | Sent by | `data` |
 | :--- | :--- | :--- |
 | `QUIZ_UPDATE` | quiz submit | `{total_responses, option_counts}` |
-| `POLL_UPDATE` | poll create / vote | `{poll_id, prompt, results}` |
-| `SUMMARY_READY` | lecture summary | `{session_id, markdown_summary}` |
-| `NEW_FORUM_POST` | legacy feed post, lecture summary | `{id, author, author_role, post_type, content, timestamp}` |
-| `ATTENDANCE_DONE` | attendance stop | `{download_url, total_present}` |
+| `POLL_UPDATE` | poll create / vote / close | `{poll_id, prompt, results, is_open}` |
+| `SUMMARY_READY` | lecture summary | `{session_id, markdown_summary, transcription_available, source_mode}` |
+| `FORUM_THREAD_NEW` | course forum post, course summary | `{id, course_id, author_id, author_name, author_role, title, content, created_at, comments}` |
+| `FORUM_COMMENT_NEW` | course forum reply | `{post_id, course_id, comment}` |
+| `STUDENT_MESSAGE_NEW` | student private message | `{id, author_id, author_name, content, is_read, created_at}` |
+| `NEW_FORUM_POST` | legacy feed post, legacy summary | `{id, author, author_role, post_type, content, timestamp}` |
+| `ATTENDANCE_UPDATE` | student self check-in | `{session_id, student_id, student_name}` |
+| `ATTENDANCE_DONE` | attendance stop | `{download_url, xlsx_download_url, total_present}` |
 
 Connections are kept in process memory ([ws_manager.py](../app/services/ws_manager.py)), so the server must run with **one worker**.
 

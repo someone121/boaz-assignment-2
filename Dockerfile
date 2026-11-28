@@ -10,12 +10,18 @@ WORKDIR /app
 # 2. Upgrade pip and install build dependencies FIRST
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
-# 3. Install necessary system dependencies for OpenCV, YOLO, and media processing
+# 3. Install necessary system dependencies for OpenCV, YOLO, media processing, and git cloning
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
     libglib2.0-0 \
     ffmpeg \
+    git \
     && rm -rf /var/lib/apt/lists/*
+COPY certs/ /usr/local/share/ca-certificates/
+RUN update-ca-certificates
+ENV PIP_CERT=/etc/ssl/certs/ca-certificates.crt \
+    REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt \
+    SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 
 # 4. Install CPU-only PyTorch and Python requirements
 COPY requirements.txt .

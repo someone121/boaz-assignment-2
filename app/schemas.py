@@ -121,7 +121,24 @@ class SessionReportResponse(BaseModel):
     students_left_early: int
     total_present: int
     attendance_rate_percent: float
+    no_data: bool = False
     is_mock_data: bool = False
+
+
+class CheckInTriggerRequest(BaseModel):
+    """Trigger a short-lived attendance self check-in QR."""
+
+    session_id: str
+    lecturer_id: Optional[str] = None
+    ttl_seconds: int = Field(default=300, ge=30, le=3600)
+
+
+class CheckInSubmitRequest(BaseModel):
+    """Student self check-in submission."""
+
+    token: str
+    student_id: str = Field(..., min_length=2, max_length=20)
+    full_name: str = Field(..., min_length=1, max_length=100)
 
 
 class QuizTriggerRequest(BaseModel):
@@ -189,6 +206,7 @@ class ForumPostResponse(BaseModel):
     recipient_id: Optional[str] = None
     title: Optional[str] = None
     content: str
+    is_read: bool = False
     created_at: datetime
 
 
@@ -241,4 +259,5 @@ class HomeworkReviewRequest(BaseModel):
     """Submit repository URLs for comparative AI OOD/SOLID review."""
 
     session_id: Optional[str] = None
+    student_id: Optional[str] = None
     repo_urls: list[str] = Field(..., min_length=1)

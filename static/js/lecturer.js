@@ -19,6 +19,7 @@ if (!currentUser || currentUser.role !== "lecturer") {
 
 const state = {
   sessionId: null,
+  publicBaseUrl: "",
   lecturer: currentUser,
   countdownTimer: null,
   webcamStream: null,
@@ -153,12 +154,32 @@ function setupWebSocket() {
 
   state.ws.on("POLL_UPDATE", (data) => {
     updatePollChart(data.results || {}, data.prompt);
+    if (data.is_open === false) {
+      document.getElementById("close-poll-btn")?.classList.add("hidden");
+    }
+  });
+
+  state.ws.on("ATTENDANCE_UPDATE", () => {
+    refreshAttendanceTable();
+  });
+
+  state.ws.on("STUDENT_MESSAGE_NEW", () => {
+    refreshStudentMessages();
+    showToast("New student message received!", "info");
+  });
+
+  state.ws.on("FORUM_THREAD_NEW", (data) => {
+    showToast(`New forum thread: ${data.title || "Discussion"}`, "info", "/forum", "Open");
   });
 
   state.ws.on("SUMMARY_READY", (data) => {
     document.getElementById("summary-spinner").classList.add("hidden");
     document.getElementById("summary-output").innerHTML = renderSafeMarkdown(data.markdown_summary || "");
-    showToast("AI Lecture Summary published to Class Forum!", "success", "/forum", "View Forum");
+    if (data.transcription_available === false) {
+      showToast("Transcription unavailable in this environment (see summary panel).", "warning");
+    } else {
+      showToast("AI Lecture Summary published to Class Forum!", "success", "/forum", "View Forum");
+    }
   });
 
   state.ws.on("ATTENDANCE_DONE", (data) => {
@@ -298,7 +319,8 @@ async function launchQuestion(questionId = null) {
     document.getElementById("active-qr-panel").classList.remove("hidden");
     document.getElementById("active-question-prompt").textContent = res.question_text;
 
-    const fullUrl = `${window.location.origin}${res.qr_path}`;
+    const baseOrigin = state.publicBaseUrl || window.location.origin;
+    const fullUrl = `${baseOrigin}${res.qr_path}`;
     const linkEl = document.getElementById("qr-direct-link");
     linkEl.href = fullUrl;
     linkEl.textContent = fullUrl;
@@ -382,10 +404,23 @@ function setupQuizAndPolls() {
         option_4: document.getElementById("poll-opt-4").value.trim() || null,
       };
       const poll = await api.createPoll(payload);
+      state.activePollId = poll.poll_id;
+      document.getElementById("close-poll-btn")?.classList.remove("hidden");
       updatePollChart(poll.results, poll.prompt);
       showToast("Live poll broadcasted!", "success");
     } catch (err) {
       showToast(err.friendlyMessage || "Could not create poll", "error");
+    }
+  });
+
+  document.getElementById("close-poll-btn")?.addEventListener("click", async () => {
+    if (!state.activePollId) return;
+    try {
+      await api.closePoll(state.activePollId);
+      document.getElementById("close-poll-btn").classList.add("hidden");
+      showToast("Poll closed!", "info");
+    } catch (err) {
+      showToast(err.friendlyMessage || "Could not close poll", "error");
     }
   });
 }
@@ -395,6 +430,8 @@ async function refreshLatestPoll() {
   try {
     const polls = await api.listSessionPolls(state.sessionId);
     if (polls.length) {
+      state.activePollId = polls[0].is_open ? polls[0].poll_id : null;
+      document.getElementById("close-poll-btn")?.classList.toggle("hidden", !polls[0].is_open);
       updatePollChart(polls[0].results, polls[0].prompt);
     }
   } catch (err) {
@@ -418,13 +455,13 @@ function setupAIStudio() {
     const file = lectureInput.files[0];
     lectureLabel.textContent = file
       ? `Selected: ${file.name} (${Math.max(1, Math.round(file.size / 1024))} KB)`
-      : "Supports .mp4, .m4a, .mp3, .wav, .txt, .md";
+      : "Supports .mp4, .m4a, .mp3, .wav, .vtt, .srt, .txt, .md";
   });
 
   document.getElementById("lecture-upload-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const file = lectureInput.files[0];
-    if (!validateUploadFile(file, [".mp4", ".m4a", ".mp3", ".wav", ".txt", ".md"], "lecture recording")) {
+    if (!validateUploadFile(file, [".mp4", ".m4a", ".mp3", ".wav", ".vtt", ".srt", ".txt", ".md"], "lecture recording")) {
       return;
     }
 
@@ -448,8 +485,12 @@ function setupAIStudio() {
       spinner.classList.add("hidden");
       document.getElementById("summary-output").innerHTML = renderSafeMarkdown(res.markdown_summary);
       lectureInput.value = "";
-      lectureLabel.textContent = "Supports .mp4, .m4a, .mp3, .wav, .txt, .md";
-      showToast("Lecture summarized & posted to Class Forum!", "success", "/forum", "View Forum");
+      lectureLabel.textContent = "Supports .mp4, .m4a, .mp3, .wav, .vtt, .srt, .txt, .md";
+      if (res.transcription_available === false) {
+        showToast("Transcription unavailable (no Whisper/API key configured).", "warning");
+      } else {
+        showToast("Lecture summarized & posted to Class Forum!", "success", "/forum", "View Forum");
+      }
     } catch (err) {
       spinner.classList.add("hidden");
       showToast(err.friendlyMessage || "Summary failed", "error");
@@ -482,25 +523,45 @@ function setupAIStudio() {
           <thead class="bg-[#fff8f0] border-b border-[#8c5a3c]/20 text-[#8c5a3c] uppercase">
             <tr>
               <th class="py-3 px-3.5">Submission</th>
-              <th class="py-3 px-3.5">Score</th>
-              <th class="py-3 px-3.5">OOD / SOLID Rubric Feedback</th>
+              <th class="py-3 px-3.5">Score &amp; Rank</th>
+              <th class="py-3 px-3.5">Similarity</th>
+              <th class="py-3 px-3.5">Rubric &amp; Feedback</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-[#8c5a3c]/10">
             ${res.reviews
-              .map(
-                (r) => `
+              .map((r) => {
+                const sim = r.similarity || {};
+                const maxSim = typeof sim.max_similarity === "number" ? sim.max_similarity : 0;
+                const flagged = Boolean(sim.flagged);
+                const rubricHtml = Object.entries(r.rubric || {})
+                  .map(
+                    ([k, v]) =>
+                      `<span class="inline-block mr-1.5 mb-1 px-2 py-0.5 rounded bg-[#fff8f0] border border-[#8c5a3c]/20 font-mono text-[10px]">${escapeHtml(k)}: ${escapeHtml(String(v?.score ?? "-"))}/20</span>`
+                  )
+                  .join("");
+                return `
               <tr class="hover:bg-[#fff8f0]/60">
                 <td class="py-3 px-3.5 align-top">
                   <div class="font-bold text-[#4b2e2b]">${escapeHtml(r.submission_label)}</div>
-                  <div class="font-mono text-[11px] text-[#8c5a3c] truncate max-w-[140px]">${escapeHtml(r.repo_url)}</div>
+                  <div class="font-mono text-[11px] text-[#8c5a3c] truncate max-w-[130px]">${escapeHtml(r.repo_url)}</div>
+                  <div class="text-[10px] text-[#8c5a3c] mt-0.5">${escapeHtml(r.analysis_mode || "")}</div>
                 </td>
-                <td class="py-3 px-3.5 align-top">
+                <td class="py-3 px-3.5 align-top whitespace-nowrap">
                   <span class="px-2.5 py-0.5 rounded-full font-bold bg-[#c08552]/20 text-[#4b2e2b]">${r.score}/100</span>
+                  <div class="text-[11px] text-[#8c5a3c] mt-1">${sim.percentile ?? 100}th pct</div>
                 </td>
-                <td class="py-3 px-3.5 text-[#4b2e2b]/90 leading-relaxed">${escapeHtml(r.ood_feedback)}</td>
-              </tr>`
-              )
+                <td class="py-3 px-3.5 align-top whitespace-nowrap">
+                  <span class="px-2 py-0.5 rounded-full text-[11px] font-semibold ${
+                    flagged ? "bg-rose-100 text-rose-800" : "bg-[#fff8f0] text-[#8c5a3c]"
+                  }">${(maxSim * 100).toFixed(0)}%${flagged ? " ⚠" : ""}</span>
+                </td>
+                <td class="py-3 px-3.5 text-[#4b2e2b]/90 leading-relaxed">
+                  <div class="mb-1">${rubricHtml}</div>
+                  <div>${escapeHtml(r.ood_feedback)}</div>
+                </td>
+              </tr>`;
+              })
               .join("")}
           </tbody>
         </table>`;
@@ -528,10 +589,10 @@ async function refreshAttendanceTable() {
       <table class="w-full text-left text-sm">
         <thead>
           <tr class="border-b border-[#8c5a3c]/20 text-xs uppercase text-[#8c5a3c]">
-            <th class="py-2.5 pr-3">Track</th>
+            <th class="py-2.5 pr-3">Source</th>
             <th class="py-2.5 pr-3">Student ID</th>
             <th class="py-2.5 pr-3">Name</th>
-            <th class="py-2.5 pr-3">Observed</th>
+            <th class="py-2.5 pr-3">Dwell / Check-In</th>
             <th class="py-2.5">Status</th>
           </tr>
         </thead>
@@ -540,10 +601,10 @@ async function refreshAttendanceTable() {
             .map(
               (rec) => `
             <tr>
-              <td class="py-2.5 pr-3 font-mono text-xs text-[#8c5a3c]">#${rec.track_id}</td>
+              <td class="py-2.5 pr-3 font-mono text-xs text-[#8c5a3c]">${escapeHtml(rec.source || "camera")}</td>
               <td class="py-2.5 pr-3 font-mono text-xs text-[#4b2e2b]">${escapeHtml(rec.student_id)}</td>
-              <td class="py-2.5 pr-3 font-medium text-[#4b2e2b]">${escapeHtml(rec.full_name)}</td>
-              <td class="py-2.5 pr-3 font-mono text-xs text-[#8c5a3c]">${rec.total_minutes_observed} min</td>
+              <td class="py-2.5 pr-3 font-medium text-[#4b2e2b]">${escapeHtml(rec.name || rec.full_name)}</td>
+              <td class="py-2.5 pr-3 font-mono text-xs text-[#8c5a3c]">${rec.total_minutes_observed} min${rec.checked_in_at ? " (QR)" : ""}</td>
               <td class="py-2.5">
                 <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold ${
                   rec.presence_status === "Present"
@@ -660,6 +721,70 @@ function setupAttendance() {
     }
   });
 
+  document.getElementById("download-xlsx-btn")?.addEventListener("click", async () => {
+    if (!state.sessionId) return;
+    try {
+      await api.downloadAttendanceXlsx(state.sessionId);
+      showToast("Excel (.xlsx) attendance downloaded!", "success");
+    } catch (err) {
+      showToast(err.friendlyMessage || "Excel export failed", "error");
+    }
+  });
+
+  document.getElementById("trigger-checkin-qr-btn")?.addEventListener("click", async () => {
+    if (!state.sessionId) return showToast("Start or select a session first.", "warning");
+    try {
+      const res = await api.triggerAttendanceCheckIn(
+        state.sessionId,
+        state.lecturer?.id_number || state.lecturer?.user_id || null,
+        300
+      );
+      const panel = document.getElementById("checkin-qr-panel");
+      const canvas = document.getElementById("checkin-qr-canvas");
+      const link = document.getElementById("checkin-direct-link");
+      const baseOrigin = state.publicBaseUrl || window.location.origin;
+    const fullUrl = `${baseOrigin}${res.qr_path}`;
+      panel.classList.remove("hidden");
+      canvas.innerHTML = "";
+      new QRCode(canvas, { text: fullUrl, width: 136, height: 136 });
+      link.href = fullUrl;
+      link.textContent = fullUrl;
+      showToast("5-minute self check-in QR is active!", "success");
+    } catch (err) {
+      showToast(err.friendlyMessage || "Could not create check-in QR", "error");
+    }
+  });
+
+  const photoInput = document.getElementById("count-photo-input");
+  const photoLabel = document.getElementById("count-photo-label");
+  photoInput?.addEventListener("change", () => {
+    const f = photoInput.files[0];
+    photoLabel.textContent = f ? f.name : "Select Class Photo (.jpg / .png)";
+  });
+
+  document.getElementById("count-photo-form")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const file = photoInput?.files[0];
+    if (!validateUploadFile(file, [".jpg", ".jpeg", ".png", ".webp"], "class photo")) return;
+    try {
+      const res = await api.countAttendancePhoto(file);
+      const resultBox = document.getElementById("count-photo-result");
+      const img = document.getElementById("count-photo-img");
+      document.getElementById("count-photo-summary").textContent = `Detected: ${res.count} student(s)`;
+      document.getElementById("count-photo-mode").textContent = res.detector_mode;
+      if (res.annotated_image_base64) {
+        img.src = res.annotated_image_base64;
+        img.classList.remove("hidden");
+      } else {
+        img.classList.add("hidden");
+      }
+      resultBox.classList.remove("hidden");
+      showToast(`Counted ${res.count} student(s) in photo.`, "success");
+    } catch (err) {
+      showToast(err.friendlyMessage || "Photo counting failed", "error");
+    }
+  });
+
   document.getElementById("refresh-sessions-report-btn").addEventListener("click", async () => {
     try {
       const sessions = await api.listSessions();
@@ -729,8 +854,10 @@ async function openSessionReportModal(sessionId) {
       ? "Live Session Report"
       : "Completed Session Report";
     document.getElementById("report-subtitle").textContent = report.is_mock_data
-      ? "Preview statistics (no CV frames uploaded yet for this session)"
-      : `Session ID: ${report.session_id.slice(0, 8)}`;
+      ? "Preview statistics (DEMO_MODE enabled)"
+      : report.no_data
+        ? "No attendance frames or check-ins recorded yet for this session"
+        : `Session ID: ${report.session_id.slice(0, 8)}`;
 
     document.getElementById("report-total-detected").textContent = String(report.total_detected);
     document.getElementById("report-left-early").textContent = String(report.students_left_early);
@@ -817,6 +944,12 @@ async function refreshPendingEnrollments() {
 async function refreshLecturerCourses() {
   try {
     const courses = await api.listCourses();
+    const select = document.getElementById("import-roster-course");
+    if (select) {
+      select.innerHTML = courses
+        .map((c) => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`)
+        .join("");
+    }
     const container = document.getElementById("lecturer-courses-list");
     if (!courses.length) {
       container.innerHTML = renderEmptyState({
@@ -839,8 +972,76 @@ async function refreshLecturerCourses() {
   }
 }
 
+async function refreshStudentMessages() {
+  try {
+    const msgs = await api.listForumPosts({ post_type: "private_message" });
+    const unread = msgs.filter((m) => !m.is_read).length;
+    const badge = document.getElementById("unread-msg-badge");
+    if (badge) badge.textContent = `${unread} unread`;
+    const list = document.getElementById("student-messages-list");
+    if (!list) return;
+    if (!msgs.length) {
+      list.innerHTML = renderEmptyState({
+        title: "No student messages yet",
+        subtitle: "Private questions and suggestions sent from student dashboards appear here live.",
+      });
+      return;
+    }
+    list.innerHTML = msgs
+      .map(
+        (m) => `
+      <div class="flex items-start justify-between gap-3 rounded-2xl border ${
+        m.is_read ? "border-[#8c5a3c]/15 bg-[#fff8f0]/40" : "border-[#c08552] bg-[#fff8f0]"
+      } px-4 py-3.5">
+        <div class="space-y-1 min-w-0">
+          <div class="flex items-center gap-2">
+            <span class="text-sm font-bold text-[#4b2e2b]">${escapeHtml(m.author_name)}</span>
+            ${m.is_read ? "" : `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#c08552] text-white">New</span>`}
+          </div>
+          <p class="text-sm text-[#4b2e2b]/90 break-words">${escapeHtml(m.content)}</p>
+        </div>
+        ${
+          m.is_read
+            ? `<span class="text-xs text-[#8c5a3c] shrink-0">Read</span>`
+            : `<button data-mid="${m.id}" class="mark-msg-read-btn bg-[#4b2e2b] hover:bg-[#8c5a3c] text-white text-xs font-semibold px-3 py-1.5 rounded-xl transition shrink-0">Mark as Read</button>`
+        }
+      </div>`
+      )
+      .join("");
+
+    list.querySelectorAll(".mark-msg-read-btn").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        try {
+          await api.markForumPostRead(Number(btn.dataset.mid));
+          await refreshStudentMessages();
+        } catch (err) {
+          showToast(err.friendlyMessage || "Could not mark message as read", "error");
+        }
+      });
+    });
+  } catch (err) {
+    console.error(err);
+  }
+}
+
 function setupEnrollments() {
   document.getElementById("refresh-enrollments-btn").addEventListener("click", refreshPendingEnrollments);
+  document.getElementById("refresh-messages-btn")?.addEventListener("click", refreshStudentMessages);
+
+  document.getElementById("import-roster-form")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const courseId = document.getElementById("import-roster-course")?.value;
+    const file = document.getElementById("import-roster-file")?.files[0];
+    if (!courseId) return showToast("Select a course first.", "warning");
+    if (!validateUploadFile(file, [".csv", ".xlsx"], "student roster")) return;
+    try {
+      const res = await api.importCourseStudents(courseId, file);
+      document.getElementById("import-roster-file").value = "";
+      showToast(`Imported ${res.imported_count} student(s) into course.`, "success");
+    } catch (err) {
+      showToast(err.friendlyMessage || "Roster import failed", "error");
+    }
+  });
 
   document.getElementById("create-course-form").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -865,6 +1066,12 @@ function setupEnrollments() {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
+  try {
+    const cfg = await api.getConfig();
+    state.publicBaseUrl = (cfg.public_base_url || "").replace(/\/+$/, "");
+  } catch {
+    state.publicBaseUrl = "";
+  }
   initCharts();
   setupTabs();
   setupAuth();
@@ -878,4 +1085,5 @@ document.addEventListener("DOMContentLoaded", async () => {
   await refreshQuestions();
   await refreshPendingEnrollments();
   await refreshLecturerCourses();
+  await refreshStudentMessages();
 });

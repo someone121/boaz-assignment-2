@@ -19,6 +19,7 @@ PAGES = {
     "/student_dashboard": "student_dashboard.html",
     "/live": "student_dashboard.html",
     "/s/some-token": "student_dashboard.html",
+    "/checkin/some-token": "student_dashboard.html",
     "/forum": "forum.html",
 }
 

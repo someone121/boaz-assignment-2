@@ -20,6 +20,7 @@ from app.config import settings
 from app.database import create_db_engine, get_db
 from app.routers import ai as ai_router
 from app.routers import quiz as quiz_router
+from app.services import ai_service as ai_service_module
 from app.services import attendance_service
 from app.services.attendance_service import attendance_manager
 
@@ -48,8 +49,24 @@ def session_factory(tmp_path, monkeypatch):
 
     # Deterministic, offline behaviour.
     monkeypatch.setattr(settings, "OPENAI_API_KEY", "")
+    monkeypatch.setattr(settings, "DEMO_MODE", False)
     monkeypatch.setattr(attendance_manager.tracker, "_initialized", True)
     monkeypatch.setattr(attendance_manager.tracker, "_model", None)
+    monkeypatch.setattr(
+        ai_service_module.ai_service,
+        "_fetch_repository_snapshot",
+        lambda url: {
+            "fetched": True,
+            "error": None,
+            "file_count": 4,
+            "test_file_count": 1,
+            "readme_length": 250,
+            "loc": 120,
+            "language_mix": {".py": 4},
+            "code_corpus": f"class RepoSample:\n    def run(self):\n        return '{url}'\n",
+            "prompt_context": f"Sample repo {url}",
+        },
+    )
 
     yield factory
     engine.dispose()

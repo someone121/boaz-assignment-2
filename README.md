@@ -16,10 +16,20 @@ It follows **KISS**: one FastAPI process, one SQLite file, and a static frontend
 
 | Documentation | |
 | :--- | :--- |
-| **This file** | Overview, quick start, accounts, configuration |
-| [docs/backend.md](docs/backend.md) | Architecture, data model, full REST + WebSocket reference, tests |
+| **This file** | Overview, F1–F5 status, quick start, accounts, configuration |
+| [DEMO.md](DEMO.md) | 10-minute in-class demo script & fallback plan |
+| [docs/tools-report.md](docs/tools-report.md) | Technical tools evaluation, rejected alternatives, benchmarks |
+| [docs/SoW.md](docs/SoW.md) | Statement of Work: objectives, scope, milestones, risks |
+| [docs/SRS.md](docs/SRS.md) | IEEE 830 Software Requirements Specification & traceability |
+| [docs/use-cases.md](docs/use-cases.md) | User stories, acceptance criteria, use-case diagram |
+| [docs/components.md](docs/components.md) | Component diagram & interfaces |
+| [docs/class-diagrams.md](docs/class-diagrams.md) | Domain/service/ORM class diagrams & design patterns |
+| [docs/sequence-diagrams.md](docs/sequence-diagrams.md) | Sequence diagrams for F1–F5 workflows |
+| [docs/testing-strategy.md](docs/testing-strategy.md) | Test levels, component-to-test map, mocking & coverage |
+| [docs/backend.md](docs/backend.md) | Architecture, data model, full REST + WebSocket reference |
 | [docs/frontend.md](docs/frontend.md) | Pages, JS modules, login state, conventions |
 | [docs/docker.md](docs/docker.md) | Image, Compose, volumes, deployment, troubleshooting |
+| [docs/conclusion.md](docs/conclusion.md) | Results, limitations, lessons learned, future work |
 
 Assignment documents (requirements and design, written before implementation): [SRS](docs/software_requirements_specification.md), [technical blueprint](docs/technical_system_blueprint.md), [extended spec (Hebrew)](docs/extended_system_specification.md), [original project readme](docs/project_readme.md).
 
@@ -31,28 +41,27 @@ Assignment documents (requirements and design, written before implementation): [
 - **Lectures are passive.** Lecturers lack quick, zero-install ways to check understanding.
 - **After the lecture,** writing summaries and giving consistent OOD/SOLID feedback on homework is slow.
 
-## 2. Features
+## 2. Features (F1–F5) & Status
 
-1. **Visual attendance.**
-   - Classroom images (webcam frames from the browser, or uploads) go through **YOLOv8n + ByteTrack**.
-   - Time seen in the room is compared with a `PresencePolicy` (default: present ≥ 70% of the session).
-   - Export to CSV.
-   - When the vision libraries aren't available, a mock tracker is used.
-2. **5-minute QR quizzes.**
-   - Upload an Excel question bank and launch a question; it shows as a QR code (`/s/{token}`) for 300 seconds.
-   - After that, answers are rejected (`410` / `403`).
-   - You get an alert when the bank is used up.
-   - Each answer is linked to an attendance track.
-3. **Live polls** with 2–4 options. Results update live over WebSockets.
-4. **Course forum.**
-   - Threads and replies per course, for the course's lecturer and its approved students.
-   - Students can also send private messages to the lecturer.
-5. **AI workflows.**
-   - Lecture summary from a recording or transcript, posted to the summary feed.
-   - Comparative OOD/SOLID review of homework repository URLs.
-   - Uses OpenAI when `OPENAI_API_KEY` is set, otherwise a fixed offline answer.
+1. **F1 — Visual Attendance, Self Check-In & Quizzes (Implemented):**
+   - Classroom images, webcam frames, and OpenCV-sampled videos (`yolo_video`) go through **YOLOv8n + ByteTrack** (mock only when YOLO cannot load).
+   - Single class photo counting (`POST /api/attendance/count-photo`) with bounding boxes.
+   - Short-lived student QR self check-in (`/checkin/{token}` → `"I'm Here"`).
+   - 5-minute `.xlsx` QR quizzes (`/s/{token}`) with `403`/`410` expiry enforcement.
+   - Unified online table + offline `.csv` and `.xlsx` exports.
+2. **F2 — Real-Time Course Forum & Private Suggestions (Implemented):**
+   - Course-scoped threads and replies broadcast live (`FORUM_THREAD_NEW`, `FORUM_COMMENT_NEW`).
+   - Private student messages/suggestions stream live (`STUDENT_MESSAGE_NEW`) to the lecturer's **Student Messages / Suggestions** panel with mark-as-read.
+   - Offline `localStorage` queue with `Queued (offline)` badge and automatic flush on reconnect.
+3. **F3 — Instant KISS Polls (Implemented):**
+   - 2–4 option polls with live Chart.js updates and `POST /api/poll/{poll_id}/close`.
+4. **F4 — AI Lecture Summary (Implemented):**
+   - Parses `.vtt`, `.srt`, `.txt`, `.md` with timestamps; extracts audio via `ffmpeg` and transcribes via OpenAI Whisper or `faster-whisper` (explicitly reporting `Transcription Unavailable` if neither is configured).
+   - Chunks long transcripts into 5 structured sections and publishes to the course forum.
+5. **F5 — AI Homework Review & Cohort Comparison (Implemented):**
+   - Shallow `git clone --depth 1` of GitHub repos, 5-criterion rubric scoring (LLM or `[Non-LLM Static Analysis]`), TF-IDF cosine similarity flagging, cohort percentiles, and student self-submission.
 
-**Out of scope:** university SSO (Moodle), live Zoom/Meet webhooks, native mobile apps (students use the mobile browser).
+**Goals & Out of Scope:** Designed for a 10-minute single-server classroom demo with zero native app installs and no national ID numbers. University SSO (Moodle), live Zoom webhooks, and native mobile apps are out of scope.
 
 ## 3. Architecture
 
@@ -200,12 +209,10 @@ Each test runs on its own temporary database, so your `data/smartclass.db` is ne
 
 ## 9. Known limitations
 
-- Audio/video lecture files are not transcribed. Summaries of recordings use a placeholder transcript; `.txt` / `.md` transcripts are used as-is.
-- Homework review does not download the repositories; scores are generated from the URLs.
-- Uploaded video files are not run through YOLO (only still images are); they fall back to the mock tracker.
-- Private student messages are stored, but no page shows them to the lecturer yet (`GET /api/forum/posts?post_type=private_message`).
-- The forum does not update live; reload or switch course to see new posts.
-- Runs as a single process (in-memory WebSockets and tracking state). Don't scale to several workers.
+- Audio/video transcription requires `OPENAI_API_KEY` (Whisper API) or local `faster-whisper`; otherwise the endpoint explicitly returns `Transcription Unavailable` (`.vtt`/`.srt`/`.txt` work offline).
+- Homework review uses `[Non-LLM Static Analysis]` + local TF-IDF similarity when `OPENAI_API_KEY` is unset.
+- Runs as a single process (in-memory WebSockets and ByteTrack state). Don't scale to several workers.
+- Login state lives in `localStorage` (suitable for a trusted-LAN classroom demo, not public internet hosting).
 
 ## 10. Troubleshooting
 
